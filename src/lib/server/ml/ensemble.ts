@@ -11,6 +11,7 @@ export const DEFAULT_ENSEMBLE_WEIGHTS: EnsembleWeights = {
 };
 
 export const ENSEMBLE_LEARNING_RATE = 1;
+export const MAX_ENSEMBLE_SIGNAL_WEIGHT = 0.6;
 
 export function normalizeScores(scores: number[]): number[] {
   if (scores.length === 0) return [];
@@ -47,10 +48,10 @@ export function blendEnsembleScores(
   componentScores: EnsembleScores,
   weights: EnsembleWeights,
 ): number[] {
-  const normalizedWeights = normalizeWeights(weights);
   const normalized = Object.fromEntries(
     Object.entries(componentScores).map(([method, scores]) => [method, normalizeScores(scores)]),
   ) as EnsembleScores;
+  const normalizedWeights = getEffectiveEnsembleWeightsFromNormalized(normalized, weights);
   const size = normalized.neural.length;
   return Array.from({ length: size }, (_, index) =>
     (Object.keys(normalizedWeights) as EnsembleMethod[]).reduce(
@@ -58,6 +59,115 @@ export function blendEnsembleScores(
       0,
     ),
   );
+}
+
+function scoresAreEquivalent(left: number[], right: number[]): boolean {
+  return left.length === right.length && left.every(
+    (value, index) => Math.abs(value - (right[index] ?? 0)) < 1e-12,
+  );
+}
+
+export function collapseDuplicateExpertWeights(
+  calibrationScores: EnsembleScores[],
+  weights: EnsembleWeights,
+): EnsembleWeights {
+  const normalizedSets = calibrationScores.map((scores) =>
+    Object.fromEntries(
+      Object.entries(scores).map(([method, values]) => [method, normalizeScores(values)]),
+    ) as EnsembleScores,
+  );
+  const collapsed = { ...normalizeWeights(weights) };
+  const methods = (Object.keys(collapsed) as EnsembleMethod[]).filter(
+    (method) => collapsed[method] > 0,
+  );
+
+  methods.forEach((method, index) => {
+    if (collapsed[method] <= 0) return;
+    for (const candidate of methods.slice(index + 1)) {
+      if (collapsed[candidate] <= 0) continue;
+      const duplicate = normalizedSets.length > 0 && normalizedSets.every((scores) =>
+        scoresAreEquivalent(scores[method], scores[candidate]),
+      );
+      if (duplicate) {
+        collapsed[method] += collapsed[candidate];
+        collapsed[candidate] = 0;
+      }
+    }
+  });
+
+  return normalizeWeights(collapsed);
+}
+
+function capGroupWeights(rawWeights: number[], maximum: number): number[] {
+  if (rawWeights.length <= 1) return rawWeights.map(() => 1);
+  const result = rawWeights.map(() => 0);
+  let remaining = rawWeights.map((_, index) => index);
+  let remainingMass = 1;
+  while (remaining.length > 0) {
+    const rawTotal = remaining.reduce((sum, index) => sum + rawWeights[index], 0);
+    const proposed = remaining.map((index) => ({
+      index,
+      value: rawTotal > 0
+        ? (rawWeights[index] / rawTotal) * remainingMass
+        : remainingMass / remaining.length,
+    }));
+    const capped = proposed.filter((item) => item.value > maximum);
+    if (capped.length === 0) {
+      proposed.forEach((item) => { result[item.index] = item.value; });
+      break;
+    }
+    capped.forEach((item) => { result[item.index] = maximum; });
+    remainingMass -= maximum * capped.length;
+    const cappedIndexes = new Set(capped.map((item) => item.index));
+    remaining = remaining.filter((index) => !cappedIndexes.has(index));
+  }
+  return result;
+}
+
+function getEffectiveEnsembleWeightsFromNormalized(
+  normalizedScores: EnsembleScores,
+  weights: EnsembleWeights,
+): EnsembleWeights {
+  const methods = (Object.keys(weights) as EnsembleMethod[]).filter(
+    (method) => weights[method] > 0,
+  );
+  const groups: EnsembleMethod[][] = [];
+  for (const method of methods) {
+    const group = groups.find((candidate) =>
+      scoresAreEquivalent(normalizedScores[candidate[0]], normalizedScores[method]),
+    );
+    if (group) group.push(method);
+    else groups.push([method]);
+  }
+  if (groups.length === 0) {
+    return getEffectiveEnsembleWeightsFromNormalized(
+      normalizedScores,
+      DEFAULT_ENSEMBLE_WEIGHTS,
+    );
+  }
+  const groupRawWeights = groups.map((group) =>
+    group.reduce((sum, method) => sum + weights[method], 0),
+  );
+  const groupWeights = capGroupWeights(groupRawWeights, MAX_ENSEMBLE_SIGNAL_WEIGHT);
+  const effective: EnsembleWeights = { neural: 0, frequency: 0, heuristic: 0, random: 0 };
+  groups.forEach((group, groupIndex) => {
+    const groupRaw = group.reduce((sum, method) => sum + weights[method], 0);
+    group.forEach((method) => {
+      effective[method] = groupWeights[groupIndex] *
+        (groupRaw > 0 ? weights[method] / groupRaw : 1 / group.length);
+    });
+  });
+  return effective;
+}
+
+export function getEffectiveEnsembleWeights(
+  componentScores: EnsembleScores,
+  weights: EnsembleWeights,
+): EnsembleWeights {
+  const normalized = Object.fromEntries(
+    Object.entries(componentScores).map(([method, scores]) => [method, normalizeScores(scores)]),
+  ) as EnsembleScores;
+  return getEffectiveEnsembleWeightsFromNormalized(normalized, weights);
 }
 
 /** Multiplicative-weights update. Rewards must be in [0, 1]. */

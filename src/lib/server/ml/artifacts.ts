@@ -29,6 +29,12 @@ export type SerializedModelArtifact = {
   weights: SerializableWeight[];
   ensembleWeights?: EnsembleWeights;
   ensembleVersion?: string;
+  ensembleReliability?: {
+    selectedMethod: "ensemble" | "neural";
+    neuralAverageMatches: number;
+    ensembleAverageMatches: number;
+    gateSampleCount: number;
+  };
   inputEncoding?: "sorted_scalar_v1" | "windowed_multi_hot_v1";
   lossVersion?: string;
   trainingSeed?: number;

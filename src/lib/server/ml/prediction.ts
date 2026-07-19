@@ -19,6 +19,8 @@ import {
   blendEnsembleScores,
   buildSeededRandomScores,
   DEFAULT_ENSEMBLE_WEIGHTS,
+  getEffectiveEnsembleWeights,
+  type EnsembleScores,
   type EnsembleWeights,
 } from "./ensemble";
 import {
@@ -40,6 +42,12 @@ type SerializedModelArtifact = {
   }>;
   ensembleWeights?: EnsembleWeights;
   ensembleVersion?: string;
+  ensembleReliability?: {
+    selectedMethod: "ensemble" | "neural";
+    neuralAverageMatches: number;
+    ensembleAverageMatches: number;
+    gateSampleCount: number;
+  };
   inputEncoding?: "sorted_scalar_v1" | "windowed_multi_hot_v1";
   lossVersion?: string;
   trainingSeed?: number;
@@ -57,6 +65,7 @@ export type NextDrawPrediction = {
   heuristicPredictedNumbers: number[];
   randomPredictedNumbers: number[];
   ensembleWeights: EnsembleWeights;
+  ensembleReliability: SerializedModelArtifact["ensembleReliability"] | null;
   generatedAt: string;
 };
 
@@ -244,15 +253,18 @@ export async function getNextDrawPrediction(
       artifact.outputNumbers.length,
       inferenceInput.latestDrawNumber + 1,
     );
-    const blendedScores = blendEnsembleScores(
-      {
-        neural: scores,
-        frequency: recentFrequencyScores,
-        heuristic: heuristicScores,
-        random: randomScores,
-      },
-      artifact.ensembleWeights ?? DEFAULT_ENSEMBLE_WEIGHTS,
+    const componentScores: EnsembleScores = {
+      neural: scores,
+      frequency: recentFrequencyScores,
+      heuristic: heuristicScores,
+      random: randomScores,
+    };
+    const learnedEnsembleWeights = artifact.ensembleWeights ?? DEFAULT_ENSEMBLE_WEIGHTS;
+    const effectiveEnsembleWeights = getEffectiveEnsembleWeights(
+      componentScores,
+      learnedEnsembleWeights,
     );
+    const blendedScores = blendEnsembleScores(componentScores, learnedEnsembleWeights);
     const neuralPredictedNumbers = pickTopKNumbers(
       scores,
       artifact.outputNumbers,
@@ -318,7 +330,8 @@ export async function getNextDrawPrediction(
       frequencyPredictedNumbers,
       heuristicPredictedNumbers,
       randomPredictedNumbers,
-      ensembleWeights: artifact.ensembleWeights ?? DEFAULT_ENSEMBLE_WEIGHTS,
+      ensembleWeights: effectiveEnsembleWeights,
+      ensembleReliability: artifact.ensembleReliability ?? null,
       generatedAt: new Date().toISOString(),
     };
   } finally {

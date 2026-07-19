@@ -90,11 +90,12 @@ export const load = async ({ url }) => {
     runId && Number.isInteger(runId) && runId > 0
       ? getRunProgress(runId)
       : (latestRuns[0] ?? null);
-  const activeRunDetail = activeRun
-    ? getRunDetail(activeRun.id, { epochs: 300, tests: 50 })
-    : null;
   const predictionRunCandidates = getPredictionRunCandidates(40);
   const pinnedPredictionRunId = getPinnedPredictionRunId();
+  const holdoutResultsRunId = pinnedPredictionRunId ?? activeRun?.id ?? null;
+  const holdoutRunDetail = holdoutResultsRunId
+    ? getRunDetail(holdoutResultsRunId, { epochs: 300, tests: 50 })
+    : null;
 
   let nextDrawPrediction = null;
   let predictionRunMessage: string | null = null;
@@ -120,7 +121,8 @@ export const load = async ({ url }) => {
     defaults: DEFAULT_TRAINING_CONFIG,
     latestRuns,
     activeRun,
-    activeRunDetail,
+    holdoutRunDetail,
+    holdoutResultsRunId,
     nextDrawPrediction,
     datasetStats: getDatasetStats(),
     recommendation: getTrainingRecommendation(),

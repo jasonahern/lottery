@@ -30,8 +30,10 @@ import { buildHeuristicScores, pickHeuristicNumbers } from "./heuristic";
 import {
   blendEnsembleScores,
   buildSeededRandomScores,
+  collapseDuplicateExpertWeights,
   DEFAULT_ENSEMBLE_WEIGHTS,
   type EnsembleMethod,
+  type EnsembleScores,
   updateEnsembleWeights,
   calculateCalibrationReward,
 } from "./ensemble";
@@ -288,26 +290,92 @@ async function runTrainingJob(runId: number): Promise<void> {
     }
 
     let totalMatches = 0;
-    let ensembleWeights = { ...DEFAULT_ENSEMBLE_WEIGHTS };
+    const gateSampleCount = Math.max(1, Math.floor(calibrationSamples.length * 0.25));
+    const weightLearningSamples = calibrationSamples.slice(0, -gateSampleCount);
+    const reliabilityGateSamples = calibrationSamples.slice(-gateSampleCount);
+    const learningRecords: Array<{
+      scores: EnsembleScores;
+      targetNumbers: number[];
+    }> = [];
 
-    // Calibrate ensemble weights on a chronological partition that the neural
-    // model did not train on. Random remains a zero-weight evaluation control.
-    for (const sample of calibrationSamples) {
+    // Score the chronological weight-learning partition first so duplicate
+    // experts can be removed across the entire partition before any updates.
+    for (const sample of weightLearningSamples) {
       const inputTensor = tf.tensor2d([sample.input], [1, inputSize]);
       const prediction = model.predict(inputTensor) as tf.Tensor;
       const scores = Array.from(await prediction.data());
       const frequencyScores = buildRecentFrequencyScores(sample.inputWindow, outputNumbers);
       const heuristicScores = buildHeuristicScores(sample.inputWindow, outputNumbers);
-      const rewards: Record<EnsembleMethod, number> = {
-        neural: calculateCalibrationReward(scores, outputNumbers, sample.targetNumbers),
-        frequency: calculateCalibrationReward(frequencyScores, outputNumbers, sample.targetNumbers),
-        heuristic: calculateCalibrationReward(heuristicScores, outputNumbers, sample.targetNumbers),
-        random: 0,
-      };
-      ensembleWeights = updateEnsembleWeights(ensembleWeights, rewards);
+      learningRecords.push({
+        scores: {
+          neural: scores,
+          frequency: frequencyScores,
+          heuristic: heuristicScores,
+          random: buildSeededRandomScores(outputNumbers.length, sample.targetDrawNumber),
+        },
+        targetNumbers: sample.targetNumbers,
+      });
       inputTensor.dispose();
       prediction.dispose();
     }
+
+    let ensembleWeights = collapseDuplicateExpertWeights(
+      learningRecords.map((record) => record.scores),
+      DEFAULT_ENSEMBLE_WEIGHTS,
+    );
+
+    // Learn weights only after equivalent experts have been collapsed.
+    // Random remains a zero-weight evaluation control.
+    for (const record of learningRecords) {
+      const rewards: Record<EnsembleMethod, number> = {
+        neural: calculateCalibrationReward(record.scores.neural, outputNumbers, record.targetNumbers),
+        frequency: calculateCalibrationReward(record.scores.frequency, outputNumbers, record.targetNumbers),
+        heuristic: calculateCalibrationReward(record.scores.heuristic, outputNumbers, record.targetNumbers),
+        random: 0,
+      };
+      ensembleWeights = updateEnsembleWeights(ensembleWeights, rewards);
+    }
+
+    let gateNeuralMatches = 0;
+    let gateEnsembleMatches = 0;
+    for (const sample of reliabilityGateSamples) {
+      const inputTensor = tf.tensor2d([sample.input], [1, inputSize]);
+      const prediction = model.predict(inputTensor) as tf.Tensor;
+      const neuralScores = Array.from(await prediction.data());
+      const componentScores: EnsembleScores = {
+        neural: neuralScores,
+        frequency: buildRecentFrequencyScores(sample.inputWindow, outputNumbers),
+        heuristic: buildHeuristicScores(sample.inputWindow, outputNumbers),
+        random: buildSeededRandomScores(outputNumbers.length, sample.targetDrawNumber),
+      };
+      const neuralNumbers = pickTopKNumbers(
+        neuralScores,
+        outputNumbers,
+        sample.targetNumbers.length,
+      );
+      const ensembleNumbers = pickTopKNumbers(
+        blendEnsembleScores(componentScores, ensembleWeights),
+        outputNumbers,
+        sample.targetNumbers.length,
+      );
+      gateNeuralMatches += countMatches(neuralNumbers, sample.targetNumbers);
+      gateEnsembleMatches += countMatches(ensembleNumbers, sample.targetNumbers);
+      inputTensor.dispose();
+      prediction.dispose();
+    }
+
+    const neuralGateAverage = gateNeuralMatches / reliabilityGateSamples.length;
+    const ensembleGateAverage = gateEnsembleMatches / reliabilityGateSamples.length;
+    const selectedMethod = ensembleGateAverage > neuralGateAverage ? "ensemble" : "neural";
+    if (selectedMethod === "neural") {
+      ensembleWeights = { neural: 1, frequency: 0, heuristic: 0, random: 0 };
+    }
+    const ensembleReliability = {
+      selectedMethod,
+      neuralAverageMatches: neuralGateAverage,
+      ensembleAverageMatches: ensembleGateAverage,
+      gateSampleCount: reliabilityGateSamples.length,
+    } as const;
 
     const methodTotals = { neural: 0, frequency: 0, random: 0, heuristic: 0, ensemble: 0 };
 
@@ -475,7 +543,8 @@ async function runTrainingJob(runId: number): Promise<void> {
       outputNumbers,
       weights: serializedWeights,
       ensembleWeights,
-      ensembleVersion: "calibrated-experts-v2",
+      ensembleVersion: "deduplicated-reliability-gate-v3",
+      ensembleReliability,
       inputEncoding: "windowed_multi_hot_v1",
       lossVersion: "weighted_bce_v1",
       trainingSeed: config.trainingSeed,

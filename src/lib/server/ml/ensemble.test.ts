@@ -8,6 +8,8 @@ import {
   normalizeScores,
   updateEnsembleWeights,
   calculateCalibrationReward,
+  getEffectiveEnsembleWeights,
+  collapseDuplicateExpertWeights,
 } from "./ensemble";
 
 test("normalizeScores converts incomparable scales to ranks", () => {
@@ -39,4 +41,43 @@ test("random score vectors are reproducible", () => {
 test("calibration reward values the complete ranking of actual numbers", () => {
   assert.equal(calculateCalibrationReward([0.9, 0.5, 0.1], [1, 2, 3], [1]), 1);
   assert.equal(calculateCalibrationReward([0.9, 0.5, 0.1], [1, 2, 3], [3]), 0);
+});
+
+test("duplicate experts count as one capped signal", () => {
+  const scores = {
+    neural: [1, 0, 0],
+    frequency: [0, 1, 0],
+    heuristic: [0, 1, 0],
+    random: [0, 0, 1],
+  };
+  const effective = getEffectiveEnsembleWeights(scores, {
+    neural: 0.14,
+    frequency: 0.31,
+    heuristic: 0.55,
+    random: 0,
+  });
+  assert.ok(Math.abs(effective.neural - 0.4) < 1e-12);
+  assert.ok(Math.abs(effective.frequency + effective.heuristic - 0.6) < 1e-12);
+  assert.equal(effective.random, 0);
+});
+
+test("duplicate experts are removed before ensemble learning", () => {
+  const collapsed = collapseDuplicateExpertWeights([
+    {
+      neural: [1, 0, 0],
+      frequency: [0, 1, 0],
+      heuristic: [0, 1, 0],
+      random: [0, 0, 1],
+    },
+    {
+      neural: [0, 1, 0],
+      frequency: [1, 0, 0],
+      heuristic: [1, 0, 0],
+      random: [0, 0, 1],
+    },
+  ], DEFAULT_ENSEMBLE_WEIGHTS);
+
+  assert.equal(collapsed.heuristic, 0);
+  assert.ok(Math.abs(collapsed.frequency - 0.55) < 1e-12);
+  assert.ok(Math.abs(collapsed.neural - 0.45) < 1e-12);
 });

@@ -13,7 +13,8 @@
   const defaults = $derived(data.defaults);
   const latestRuns = $derived(data.latestRuns);
   const activeRun = $derived(data.activeRun);
-  const activeRunDetail = $derived(data.activeRunDetail);
+  const holdoutRunDetail = $derived(data.holdoutRunDetail);
+  const holdoutResultsRunId = $derived(data.holdoutResultsRunId);
   const nextDrawPrediction = $derived(data.nextDrawPrediction);
   const datasetStats = $derived(data.datasetStats);
   const recommendation = $derived(data.recommendation);
@@ -51,7 +52,7 @@
   const activeProgress = $derived(form?.progress ?? activeRun);
   const createdRun = $derived(form?.run);
   const holdoutComparison = $derived.by(() => {
-    const results = activeRunDetail?.testResults ?? [];
+    const results = holdoutRunDetail?.testResults ?? [];
     if (results.length === 0) {
       return null;
     }
@@ -368,6 +369,14 @@
               Fixed-weights mode is ON with pinned run #{pinnedPredictionRunId}.
             </p>
           {/if}
+          {#if nextDrawPrediction.ensembleReliability}
+            <p class="mt-1 text-xs font-semibold text-emerald-800">
+              Reliability gate selected {nextDrawPrediction.ensembleReliability.selectedMethod === "neural" ? "Neural only" : "the calibrated ensemble"}
+              ({nextDrawPrediction.ensembleReliability.gateSampleCount} calibration samples;
+              Neural {nextDrawPrediction.ensembleReliability.neuralAverageMatches.toFixed(2)},
+              Ensemble {nextDrawPrediction.ensembleReliability.ensembleAverageMatches.toFixed(2)}).
+            </p>
+          {/if}
         {:else}
           <p class="mt-1 text-sm text-zinc-700">
             No completed run artifact is available yet. Complete at least one
@@ -438,6 +447,18 @@
         1) Pin a completed run once. 2) Import new draw data when available. 3)
         Return here to get the next prediction from the same unchanged weights.
       </p>
+
+      <div class="mt-3 rounded-md border border-emerald-100 bg-emerald-50/70 p-3 text-sm text-zinc-700">
+        <p class="font-semibold text-emerald-900">How to select a specific run</p>
+        <ol class="mt-1 list-decimal space-y-1 pl-5">
+          <li>Open the completed-run list below and choose the run number you want.</li>
+          <li>Click <span class="font-semibold text-zinc-900">Pin Run</span>.</li>
+          <li>Confirm that the prediction heading says it is based on that run and that the fixed-weights message shows the same pinned run number.</li>
+        </ol>
+        <p class="mt-2 text-xs text-zinc-600">
+          The pinned run remains selected after page refreshes and draw-data imports. Its saved model and ensemble weights generate every next-draw ticket until you select another run. Choose <span class="font-semibold text-zinc-800">Use Auto</span> to clear the pin and return to automatic run selection.
+        </p>
+      </div>
 
       <div class="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
         <form
@@ -1048,8 +1069,13 @@
   <div>
     <Card>
       <h2 class="text-xl font-semibold text-zinc-900">
-        Holdout Results (Active Run)
+        Holdout Results {holdoutResultsRunId ? `(Run #${holdoutResultsRunId})` : ""}
       </h2>
+      {#if pinnedPredictionRunId && holdoutResultsRunId === pinnedPredictionRunId}
+        <p class="mt-1 text-xs font-semibold text-emerald-700">
+          Showing the holdout predictions and scores for pinned run #{pinnedPredictionRunId}.
+        </p>
+      {/if}
       {#if holdoutComparison}
         <p class="mt-2 text-sm text-zinc-600">
           Average matches: model {holdoutComparison.model?.toFixed(2) ?? "n/a"},
@@ -1060,9 +1086,9 @@
         </p>
       {/if}
 
-      {#if activeRunDetail && activeRunDetail.methodSummaries.length > 0}
+      {#if holdoutRunDetail && holdoutRunDetail.methodSummaries.length > 0}
         <div class="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          {#each activeRunDetail.methodSummaries as summary}
+          {#each holdoutRunDetail.methodSummaries as summary}
             <div class="rounded-md border border-zinc-200 bg-white p-3">
               <p class="text-xs uppercase tracking-wide text-zinc-500">
                 {summary.method}
@@ -1083,7 +1109,7 @@
         </div>
       {/if}
 
-      {#if activeRunDetail && activeRunDetail.testResults.length > 0}
+      {#if holdoutRunDetail && holdoutRunDetail.testResults.length > 0}
         <div class="mt-4 flex flex-wrap items-center gap-4 text-xs text-zinc-600">
           <span class="font-semibold text-zinc-700">Number key:</span>
           <span class="inline-flex items-center gap-1.5">
@@ -1116,7 +1142,7 @@
               </tr>
             </thead>
             <tbody>
-              {#each activeRunDetail.testResults as result}
+              {#each holdoutRunDetail.testResults as result}
                 <tr class="border-b border-zinc-100 text-zinc-800">
                   <td class="px-3 py-2"
                     >{result.drawNumber ? `#${result.drawNumber}` : "n/a"}</td
@@ -1199,7 +1225,7 @@
         </div>
       {:else}
         <p class="mt-2 text-sm text-zinc-600">
-          No holdout predictions stored for the active run yet.
+          No holdout predictions are stored for this run yet.
         </p>
       {/if}
     </Card>
