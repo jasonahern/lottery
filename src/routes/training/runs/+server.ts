@@ -3,7 +3,6 @@ import { json } from "@sveltejs/kit";
 import {
   getLatestRuns,
   getRunDetail,
-  getTrainingRecommendation,
 } from "$lib/server/ml/runs";
 import { getFeedbackLoopStatus } from "$lib/server/ml/policy";
 
@@ -49,7 +48,6 @@ export const GET = async ({ url }) => {
   return json({
     success: true,
     runs: getLatestRuns(limit),
-    recommendation: getTrainingRecommendation(),
     feedbackStatus: getFeedbackLoopStatus(),
   });
 };

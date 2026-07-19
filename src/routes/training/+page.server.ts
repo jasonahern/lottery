@@ -26,7 +26,7 @@ import {
   getRunComparisonSummaries,
   getRunDetail,
   getRunProgress,
-  getTrainingRecommendation,
+  getTrainingRunFormConfig,
   type RunSummary,
 } from "$lib/server/ml/runs";
 import { getNextDrawPrediction } from "$lib/server/ml/prediction";
@@ -90,6 +90,9 @@ export const load = async ({ url }) => {
     runId && Number.isInteger(runId) && runId > 0
       ? getRunProgress(runId)
       : (latestRuns[0] ?? null);
+  const latestRunFormConfig = activeRun
+    ? getTrainingRunFormConfig(activeRun.id)
+    : null;
   const predictionRunCandidates = getPredictionRunCandidates(40);
   const pinnedPredictionRunId = getPinnedPredictionRunId();
   const holdoutResultsRunId = pinnedPredictionRunId ?? activeRun?.id ?? null;
@@ -125,7 +128,7 @@ export const load = async ({ url }) => {
     holdoutResultsRunId,
     nextDrawPrediction,
     datasetStats: getDatasetStats(),
-    recommendation: getTrainingRecommendation(),
+    latestRunFormConfig,
     feedbackStatus: getFeedbackLoopStatus(),
     predictionRunCandidates,
     runComparisonSummaries: getRunComparisonSummaries(20),

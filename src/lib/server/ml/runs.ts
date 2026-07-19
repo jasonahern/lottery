@@ -16,13 +16,6 @@ import {
   validateTrainingConfig,
 } from "./config";
 import {
-  choosePolicyDecision,
-  defaultPolicyConfig,
-  getFeedbackLoopStatus,
-  type FeedbackLoopStatus,
-  type PolicySignal,
-} from "./policy";
-import {
   assertNoLeakage,
   assertDrawIntegrity,
   createWindowedSamples,
@@ -143,89 +136,10 @@ export type PredictionRunCandidate = {
   windowSize: number;
 };
 
-export type TrainingRecommendation = {
-  kind: "scale_up" | "regularize" | "keep";
-  message: string;
-  suggestedPreset?: "small" | "medium" | "large" | "xlarge";
-  recommendedConfig?: {
-    windowSize: number;
-    epochs: number;
-    batchSize: number;
-    learningRate: number;
-    dropoutRate: number;
-  };
-  source?: "policy" | "fallback";
-  policyMode?: "off" | "shadow" | "active";
-  algorithmVersion?: string;
-  explorationRate?: number;
-  wasExploration?: boolean;
-  policyRationale?: string;
-  feedbackStatus?: FeedbackLoopStatus;
+export type TrainingRunFormConfig = TrainingConfig & {
+  runId: number;
+  status: string;
 };
-
-function clampInt(value: number, min: number, max: number): number {
-  if (!Number.isFinite(value)) {
-    return min;
-  }
-
-  return Math.max(min, Math.min(max, Math.round(value)));
-}
-
-function clampFloat(
-  value: number,
-  min: number,
-  max: number,
-  precision = 6,
-): number {
-  if (!Number.isFinite(value)) {
-    return min;
-  }
-
-  const bounded = Math.max(min, Math.min(max, value));
-  return Number(bounded.toFixed(precision));
-}
-
-function parseLatestRunConfig(
-  value: string,
-): Pick<
-  TrainingConfig,
-  "windowSize" | "epochs" | "batchSize" | "learningRate" | "dropoutRate"
-> {
-  try {
-    const parsed = JSON.parse(value) as Partial<TrainingConfig>;
-    return {
-      windowSize: clampInt(
-        parsed.windowSize ?? DEFAULT_TRAINING_CONFIG.windowSize,
-        1,
-        52,
-      ),
-      epochs: clampInt(parsed.epochs ?? DEFAULT_TRAINING_CONFIG.epochs, 1, 500),
-      batchSize: clampInt(
-        parsed.batchSize ?? DEFAULT_TRAINING_CONFIG.batchSize,
-        1,
-        1024,
-      ),
-      learningRate: clampFloat(
-        parsed.learningRate ?? DEFAULT_TRAINING_CONFIG.learningRate,
-        0.000001,
-        0.1,
-      ),
-      dropoutRate: clampFloat(
-        parsed.dropoutRate ?? DEFAULT_TRAINING_CONFIG.dropoutRate,
-        0,
-        0.99,
-      ),
-    };
-  } catch {
-    return {
-      windowSize: DEFAULT_TRAINING_CONFIG.windowSize,
-      epochs: DEFAULT_TRAINING_CONFIG.epochs,
-      batchSize: DEFAULT_TRAINING_CONFIG.batchSize,
-      learningRate: DEFAULT_TRAINING_CONFIG.learningRate,
-      dropoutRate: DEFAULT_TRAINING_CONFIG.dropoutRate,
-    };
-  }
-}
 
 function estimateParamCount(
   inputSize: number,
@@ -636,6 +550,30 @@ export function getRunProgress(runId: number): RunSummary | null {
     createdAt: run.createdAt,
     startedAt: run.startedAt,
     endedAt: run.endedAt,
+  };
+}
+
+export function getTrainingRunFormConfig(runId: number): TrainingRunFormConfig | null {
+  const row = db
+    .select({
+      id: nnTrainingRuns.id,
+      status: nnTrainingRuns.status,
+      hiddenLayersJson: nnTrainingRuns.hiddenLayersJson,
+      hyperparamsJson: nnTrainingRuns.hyperparamsJson,
+    })
+    .from(nnTrainingRuns)
+    .where(eq(nnTrainingRuns.id, runId))
+    .get();
+
+  if (!row) return null;
+
+  const parsed = JSON.parse(row.hyperparamsJson) as Partial<TrainingConfig>;
+  return {
+    ...DEFAULT_TRAINING_CONFIG,
+    ...parsed,
+    hiddenLayers: JSON.parse(row.hiddenLayersJson) as number[],
+    runId: row.id,
+    status: row.status,
   };
 }
 
@@ -1091,137 +1029,6 @@ export function getDatasetStats(): DatasetStats {
     maxObservedNumber,
     conflictingDrawIdentities: [...identityCounts.values()].filter((count) => count > 1).length,
     randomExpectedMatches: Number(((6 * 6) / Math.max(1, maxObservedNumber)).toFixed(4)),
-  };
-}
-
-function nextPresetForHiddenLayers(
-  hiddenLayers: number[],
-): "small" | "medium" | "large" | "xlarge" | null {
-  const signature = hiddenLayers.join(",");
-  if (signature === "64,32") {
-    return "medium";
-  }
-  if (signature === "128,64") {
-    return "large";
-  }
-  if (signature === "256,128") {
-    return "xlarge";
-  }
-
-  return null;
-}
-
-export function getTrainingRecommendation(): TrainingRecommendation {
-  const recentCompleted = db
-    .select({
-      id: nnTrainingRuns.id,
-      hiddenLayersJson: nnTrainingRuns.hiddenLayersJson,
-      hyperparamsJson: nnTrainingRuns.hyperparamsJson,
-      holdoutScore: nnTrainingRuns.holdoutScore,
-      finalTrainLoss: nnTrainingRuns.finalTrainLoss,
-      finalValLoss: nnTrainingRuns.finalValLoss,
-    })
-    .from(nnTrainingRuns)
-    .where(and(eq(nnTrainingRuns.status, "completed"), eq(nnTrainingRuns.isValid, true)))
-    .orderBy(desc(nnTrainingRuns.id))
-    .limit(4)
-    .all();
-
-  const feedbackStatus = getFeedbackLoopStatus();
-
-  const latest = recentCompleted[0] ?? null;
-  const latestConfig = latest
-    ? parseLatestRunConfig(latest.hyperparamsJson)
-    : defaultPolicyConfig();
-  const latestScore = latest ? parseNullableNumber(latest.holdoutScore) : null;
-  const latestTrainLoss = latest
-    ? parseNullableNumber(latest.finalTrainLoss)
-    : null;
-  const latestValLoss = latest
-    ? parseNullableNumber(latest.finalValLoss)
-    : null;
-
-  let kind: "scale_up" | "regularize" | "keep" = "keep";
-  let message =
-    "Current capacity looks reasonable. Keep architecture and tune other hyperparameters next.";
-  let suggestedPreset: "small" | "medium" | "large" | "xlarge" | undefined;
-  let signal: PolicySignal = "keep";
-
-  if (recentCompleted.length < 2) {
-    message =
-      "Need at least two completed runs before making a tuning recommendation.";
-  } else if (
-    latestScore === null ||
-    latestTrainLoss === null ||
-    latestValLoss === null
-  ) {
-    message =
-      "Latest run is missing metrics. Complete another run for recommendations.";
-  } else {
-    const previousScores = recentCompleted
-      .slice(1)
-      .map((row) => parseNullableNumber(row.holdoutScore))
-      .filter((score): score is number => score !== null);
-
-    const bestPreviousScore =
-      previousScores.length > 0 ? Math.max(...previousScores) : null;
-
-    const isOverfittingSignal = latestValLoss > latestTrainLoss * 1.2;
-    if (isOverfittingSignal) {
-      kind = "regularize";
-      signal = "regularize";
-      message =
-        "Validation loss is significantly above training loss. Increase dropout or reduce neurons before scaling up.";
-    } else {
-      const noImprovement =
-        bestPreviousScore !== null && latestScore <= bestPreviousScore;
-      if (noImprovement && recentCompleted.length >= 4) {
-        const latestHidden = JSON.parse(latest.hiddenLayersJson) as number[];
-        const suggested = nextPresetForHiddenLayers(latestHidden);
-        if (suggested) {
-          kind = "scale_up";
-          signal = "scale_up";
-          suggestedPreset = suggested;
-          message = `No holdout improvement in recent runs. Consider scaling up to ${suggested} preset.`;
-        }
-      }
-    }
-  }
-
-  const policyDecision = choosePolicyDecision({
-    baseConfig: latestConfig,
-    signal,
-    context: {
-      latestRunId: latest?.id ?? null,
-      signal,
-      latestTrainLoss,
-      latestValLoss,
-      latestHoldoutScore: latestScore,
-    },
-  });
-
-  return {
-    kind,
-    message,
-    suggestedPreset,
-    recommendedConfig: {
-      windowSize: clampInt(policyDecision.config.windowSize, 1, 52),
-      epochs: clampInt(policyDecision.config.epochs, 1, 500),
-      batchSize: clampInt(policyDecision.config.batchSize, 1, 1024),
-      learningRate: clampFloat(
-        policyDecision.config.learningRate,
-        0.000001,
-        0.1,
-      ),
-      dropoutRate: clampFloat(policyDecision.config.dropoutRate, 0, 0.99),
-    },
-    source: policyDecision.source,
-    policyMode: policyDecision.mode,
-    algorithmVersion: policyDecision.algorithmVersion,
-    explorationRate: policyDecision.explorationRate,
-    wasExploration: policyDecision.wasExploration,
-    policyRationale: policyDecision.rationale,
-    feedbackStatus,
   };
 }
 

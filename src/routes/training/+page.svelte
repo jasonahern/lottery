@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { browser } from "$app/environment";
   import { enhance } from "$app/forms";
   import { invalidateAll } from "$app/navigation";
   import { onDestroy } from "svelte";
@@ -18,7 +17,7 @@
   const holdoutResultsRunId = $derived(data.holdoutResultsRunId);
   const nextDrawPrediction = $derived(data.nextDrawPrediction);
   const datasetStats = $derived(data.datasetStats);
-  const recommendation = $derived(data.recommendation);
+  const latestRunFormConfig = $derived(data.latestRunFormConfig);
   const feedbackStatus = $derived(data.feedbackStatus);
   const predictionRunCandidates = $derived(data.predictionRunCandidates);
   const runComparisonSummaries = $derived(data.runComparisonSummaries);
@@ -102,11 +101,8 @@
   let trainingSeedInput = $state("");
   let policyModeInput = $state("");
   let predictionRunInput = $state("");
-  let trainingConfigInitialized = $state(false);
-
-  const TRAINING_FORM_STORAGE_KEY = "lottery_training_form_v1";
-
-  const recommendedConfig = $derived(recommendation.recommendedConfig ?? null);
+  let appliedFormRunId = $state<number | null>(null);
+  let defaultsApplied = $state(false);
 
   $effect(() => {
     if (!policyModeInput) {
@@ -121,52 +117,44 @@
   });
 
   $effect(() => {
-    if (trainingConfigInitialized) return;
-    let saved: Record<string, unknown> | null = null;
-    if (browser) {
-      try {
-        saved = JSON.parse(localStorage.getItem(TRAINING_FORM_STORAGE_KEY) ?? "null") as Record<string, unknown> | null;
-      } catch {
-        localStorage.removeItem(TRAINING_FORM_STORAGE_KEY);
-      }
+    const config = latestRunFormConfig;
+    if (config && appliedFormRunId !== config.runId) {
+      const layerSignature = config.hiddenLayers.join(",");
+      const presetByLayers: Record<string, string> = {
+        "64,32": "small",
+        "128,64": "medium",
+        "256,128": "large",
+        "512,256": "xlarge",
+      };
+      selectedPreset = presetByLayers[layerSignature] ?? "custom";
+      customHiddenLayersText = presetByLayers[layerSignature]
+        ? ""
+        : layerSignature;
+      holdoutWeeksInput = String(config.holdoutWeeks);
+      windowSizeInput = String(config.windowSize);
+      epochsInput = String(config.epochs);
+      batchSizeInput = String(config.batchSize);
+      learningRateInput = String(config.learningRate);
+      dropoutRateInput = String(config.dropoutRate);
+      positiveClassWeightInput = String(config.positiveClassWeight);
+      earlyStoppingPatienceInput = String(config.earlyStoppingPatience);
+      earlyStoppingMinDeltaInput = String(config.earlyStoppingMinDelta);
+      trainingSeedInput = String(config.trainingSeed);
+      appliedFormRunId = config.runId;
+      defaultsApplied = true;
+    } else if (!config && !defaultsApplied) {
+      holdoutWeeksInput = String(defaults.holdoutWeeks);
+      windowSizeInput = String(defaults.windowSize);
+      epochsInput = String(defaults.epochs);
+      batchSizeInput = String(defaults.batchSize);
+      learningRateInput = String(defaults.learningRate);
+      dropoutRateInput = String(defaults.dropoutRate);
+      positiveClassWeightInput = String(defaults.positiveClassWeight);
+      earlyStoppingPatienceInput = String(defaults.earlyStoppingPatience);
+      earlyStoppingMinDeltaInput = String(defaults.earlyStoppingMinDelta);
+      trainingSeedInput = String(defaults.trainingSeed);
+      defaultsApplied = true;
     }
-
-    const savedString = (key: string, fallback: string) =>
-      typeof saved?.[key] === "string" ? saved[key] as string : fallback;
-    const savedPreset = savedString("selectedPreset", "medium");
-    selectedPreset = ["small", "medium", "large", "xlarge"].includes(savedPreset)
-      ? savedPreset
-      : "medium";
-    customHiddenLayersText = savedString("customHiddenLayersText", "");
-    holdoutWeeksInput = savedString("holdoutWeeksInput", String(defaults.holdoutWeeks));
-    windowSizeInput = savedString("windowSizeInput", String(recommendedConfig?.windowSize ?? defaults.windowSize));
-    epochsInput = savedString("epochsInput", String(recommendedConfig?.epochs ?? defaults.epochs));
-    batchSizeInput = savedString("batchSizeInput", String(recommendedConfig?.batchSize ?? defaults.batchSize));
-    learningRateInput = savedString("learningRateInput", String(recommendedConfig?.learningRate ?? defaults.learningRate));
-    dropoutRateInput = savedString("dropoutRateInput", String(recommendedConfig?.dropoutRate ?? defaults.dropoutRate));
-    positiveClassWeightInput = savedString("positiveClassWeightInput", String(defaults.positiveClassWeight));
-    earlyStoppingPatienceInput = savedString("earlyStoppingPatienceInput", String(defaults.earlyStoppingPatience));
-    earlyStoppingMinDeltaInput = savedString("earlyStoppingMinDeltaInput", String(defaults.earlyStoppingMinDelta));
-    trainingSeedInput = savedString("trainingSeedInput", String(defaults.trainingSeed));
-    trainingConfigInitialized = true;
-  });
-
-  $effect(() => {
-    if (!browser || !trainingConfigInitialized) return;
-    localStorage.setItem(TRAINING_FORM_STORAGE_KEY, JSON.stringify({
-      selectedPreset,
-      customHiddenLayersText,
-      holdoutWeeksInput,
-      windowSizeInput,
-      epochsInput,
-      batchSizeInput,
-      learningRateInput,
-      dropoutRateInput,
-      positiveClassWeightInput,
-      earlyStoppingPatienceInput,
-      earlyStoppingMinDeltaInput,
-      trainingSeedInput,
-    }));
   });
 
   const preserveCreateRunValues: SubmitFunction = () => {
@@ -200,6 +188,10 @@
 
     if (selectedPreset === "xlarge") {
       return [512, 256];
+    }
+
+    if (selectedPreset === "custom") {
+      return [];
     }
 
     return [128, 64];
@@ -545,27 +537,14 @@
       <Badge variant="subtle">Custom Config</Badge>
     </div>
 
-    {#if recommendedConfig}
-      <div
-        class="mb-4 rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-900"
-      >
+    {#if latestRunFormConfig}
+      <div class="mb-4 rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
         <p class="font-semibold">
-          Initial recommended values were applied when this page opened. Your
-          edits remain unchanged after creating a run.
+          Showing the exact values used by run #{latestRunFormConfig.runId}.
         </p>
-        <p class="mt-1">
-          Window {recommendedConfig.windowSize}, Epochs {recommendedConfig.epochs},
-          Batch size {recommendedConfig.batchSize}, Learning rate {recommendedConfig.learningRate},
-          Dropout {recommendedConfig.dropoutRate}.
+        <p class="mt-1 text-xs text-emerald-800">
+          Run status: {latestRunFormConfig.status}. These recorded values remain visible after the run ends and can be edited to create the next run.
         </p>
-        {#if recommendation.source}
-          <p class="mt-1 text-xs text-emerald-800">
-            Source: {recommendation.source} | Mode: {recommendation.policyMode ??
-              "n/a"} | Exploration: {recommendation.wasExploration
-              ? "yes"
-              : "no"}
-          </p>
-        {/if}
       </div>
     {/if}
 
@@ -618,8 +597,14 @@
           <select
             name="preset"
             bind:value={selectedPreset}
+            onchange={(event) => {
+              if (event.currentTarget.value !== "custom") {
+                customHiddenLayersText = "";
+              }
+            }}
             class="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-900 shadow-sm focus:border-zinc-500 focus:outline-none"
           >
+            <option value="custom">custom (use layers field)</option>
             <option value="small">small (64,32)</option>
             <option value="medium">medium (128,64)</option>
             <option value="large">large (256,128)</option>
@@ -828,19 +813,6 @@
         Run #{createdRun.id} created with hidden layers [{createdRun.hiddenLayers.join(
           ", ",
         )}]
-      </p>
-    {/if}
-  </Card>
-
-  <Card class="border-zinc-300 bg-zinc-50">
-    <h2 class="text-xl font-semibold text-zinc-900">Capacity Recommendation</h2>
-    <p class="mt-2 text-sm text-zinc-700">{recommendation.message}</p>
-    {#if recommendation.policyRationale}
-      <p class="mt-2 text-xs text-zinc-600">{recommendation.policyRationale}</p>
-    {/if}
-    {#if recommendation.suggestedPreset}
-      <p class="mt-2 text-sm font-semibold text-emerald-700">
-        Suggested preset: {recommendation.suggestedPreset}
       </p>
     {/if}
   </Card>
