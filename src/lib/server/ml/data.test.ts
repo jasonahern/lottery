@@ -121,7 +121,7 @@ test("parseCsvRowsWithRounds assigns two same-number rows to separate rounds", (
   assert.deepEqual(rows.map((row) => row.parsed.draw.drawRound), [1, 2]);
 });
 
-test("createWindowedSamples never mixes rounds", () => {
+test("createWindowedSamples gives both rounds the same prior-event window", () => {
   const draws = Array.from({ length: 6 }, (_, index) =>
     [1, 2].map((drawRound) => ({
       id: index * 2 + drawRound,
@@ -137,6 +137,9 @@ test("createWindowedSamples never mixes rounds", () => {
   const samples = createWindowedSamples(draws, 3);
   assert.ok(samples.length > 0);
   assert.ok(samples.every((sample) => sample.inputWindow.every(
-    (draw) => draw.drawRound === sample.targetDraw.drawRound,
+    (draw) => draw.drawDate.getTime() < sample.targetDraw.drawDate.getTime(),
   )));
+  const paired = samples.filter((sample) => sample.targetDraw.drawNumber === 4003);
+  assert.equal(paired.length, 2);
+  assert.deepEqual(paired[0].inputDrawIds, paired[1].inputDrawIds);
 });

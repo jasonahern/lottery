@@ -439,6 +439,34 @@ export type WindowedSample = {
   targetDraw: ParsedDraw;
 };
 
+/** One historical feature row per ticket event. Multi-round results are merged. */
+export function buildDrawEventHistory(draws: ParsedDraw[]): ParsedDraw[] {
+  const events = new Map<string, ParsedDraw[]>();
+  for (const draw of draws) {
+    const key = `${draw.drawNumber}:${draw.drawDate.getTime()}`;
+    events.set(key, [...(events.get(key) ?? []), draw]);
+  }
+  return [...events.values()]
+    .map((rounds) => {
+      const ordered = [...rounds].sort((a, b) => a.drawRound - b.drawRound);
+      const first = ordered[0];
+      return {
+        ...first,
+        id: Math.min(...ordered.map((draw) => draw.id)),
+        winningNumbers: [...new Set(ordered.flatMap((draw) => draw.winningNumbers))],
+        bonusNumber: null,
+        machine: null,
+        ballSet: null,
+        drawRound: 0,
+      };
+    })
+    .sort(
+      (a, b) =>
+        a.drawDate.getTime() - b.drawDate.getTime() ||
+        a.drawNumber - b.drawNumber,
+    );
+}
+
 export function createWindowedSamples(
   draws: ParsedDraw[],
   windowSize: number,
@@ -456,27 +484,28 @@ export function createWindowedSamples(
     return a.drawNumber - b.drawNumber || a.id - b.id;
   });
 
-  const samples: WindowedSample[] = [];
-  const rounds = new Set(sorted.map((draw) => draw.drawRound));
-  for (const round of rounds) {
-    const roundDraws = sorted.filter((draw) => draw.drawRound === round);
-    for (let i = windowSize; i < roundDraws.length; i += 1) {
-      const inputWindow = roundDraws.slice(i - windowSize, i);
-      const targetDraw = roundDraws[i];
+  const history = buildDrawEventHistory(sorted);
+  const targetsByEvent = new Map<string, ParsedDraw[]>();
+  for (const draw of sorted) {
+    const key = `${draw.drawNumber}:${draw.drawDate.getTime()}`;
+    targetsByEvent.set(key, [...(targetsByEvent.get(key) ?? []), draw]);
+  }
 
+  const samples: WindowedSample[] = [];
+  for (let i = windowSize; i < history.length; i += 1) {
+    const inputWindow = history.slice(i - windowSize, i);
+    const event = history[i];
+    const targets = targetsByEvent.get(`${event.drawNumber}:${event.drawDate.getTime()}`) ?? [];
+    for (const targetDraw of targets.sort((a, b) => a.drawRound - b.drawRound)) {
       samples.push({
-        inputDrawIds: inputWindow.map((d) => d.id),
+        inputDrawIds: inputWindow.map((draw) => draw.id),
         targetDrawId: targetDraw.id,
         inputWindow,
         targetDraw,
       });
     }
   }
-  return samples.sort(
-    (a, b) =>
-      a.targetDraw.drawDate.getTime() - b.targetDraw.drawDate.getTime() ||
-      a.targetDraw.drawRound - b.targetDraw.drawRound,
-  );
+  return samples;
 }
 
 export function assertNoLeakage(

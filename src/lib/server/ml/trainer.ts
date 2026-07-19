@@ -51,6 +51,7 @@ type WindowedVectorSample = {
   targetMultiHot: number[];
   targetNumbers: number[];
   targetDrawId: number;
+  targetDrawNumber: number;
   targetDrawDate: string;
 };
 
@@ -121,6 +122,7 @@ function prepareSamples(config: TrainingConfig) {
         ),
         targetNumbers: canonicalizeNumbers(sample.targetDraw.winningNumbers),
         targetDrawId: sample.targetDraw.id,
+        targetDrawNumber: sample.targetDraw.drawNumber,
         targetDrawDate: sample.targetDraw.drawDate.toISOString().slice(0, 10),
       }),
     );
@@ -137,6 +139,7 @@ function prepareSamples(config: TrainingConfig) {
         ),
         targetNumbers: canonicalizeNumbers(sample.targetDraw.winningNumbers),
         targetDrawId: sample.targetDraw.id,
+        targetDrawNumber: sample.targetDraw.drawNumber,
         targetDrawDate: sample.targetDraw.drawDate.toISOString().slice(0, 10),
       }),
     );
@@ -241,20 +244,29 @@ async function runTrainingJob(runId: number): Promise<void> {
     const startedAt = Date.now();
     let bestValLoss = Number.POSITIVE_INFINITY;
     let bestEpoch: number | null = null;
+    let epochsWithoutImprovement = 0;
 
     await model.fit(xTrain, yTrain, {
       epochs: config.epochs,
       batchSize: config.batchSize,
       shuffle: false,
       validationData: [xCalibration, yCalibration],
-      callbacks: [{
+      callbacks: {
         onEpochEnd: async (epoch: number, logs?: tf.Logs) => {
           const epochNumber = epoch + 1;
-          if (typeof logs?.val_loss === "number" && logs.val_loss < bestValLoss) {
-            bestValLoss = logs.val_loss;
-            bestEpoch = epochNumber;
-            disposeWeights(bestWeights);
-            bestWeights = model?.getWeights().map((weight) => weight.clone()) ?? null;
+          if (typeof logs?.val_loss === "number") {
+            if (logs.val_loss < bestValLoss - config.earlyStoppingMinDelta) {
+              bestValLoss = logs.val_loss;
+              bestEpoch = epochNumber;
+              epochsWithoutImprovement = 0;
+              disposeWeights(bestWeights);
+              bestWeights = model?.getWeights().map((weight) => weight.clone()) ?? null;
+            } else {
+              epochsWithoutImprovement += 1;
+              if (epochsWithoutImprovement >= config.earlyStoppingPatience && model) {
+                model.stopTraining = true;
+              }
+            }
           }
           const elapsedMs = Date.now() - startedAt;
           updateRunEpochProgress({
@@ -268,11 +280,7 @@ async function runTrainingJob(runId: number): Promise<void> {
             samplesProcessed: epochNumber * samplesPerEpoch,
           });
         },
-      }, tf.callbacks.earlyStopping({
-        monitor: "val_loss",
-        patience: config.earlyStoppingPatience,
-        minDelta: config.earlyStoppingMinDelta,
-      })],
+      },
     });
 
     if (bestWeights) {
@@ -329,7 +337,7 @@ async function runTrainingJob(runId: number): Promise<void> {
       );
       const randomScores = buildSeededRandomScores(
         outputNumbers.length,
-        sample.targetDrawId,
+        sample.targetDrawNumber,
       );
       const randomPredictedNumbers = pickTopKNumbers(
         randomScores,

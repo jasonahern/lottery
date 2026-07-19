@@ -365,11 +365,12 @@
         </p>
         {#if nextDrawPrediction}
           <p class="mt-1 text-xl font-bold text-zinc-900">
-            Predicted numbers for Draw #{nextDrawPrediction.nextDrawNumber}, Round {nextDrawPrediction.drawRound}
+            Ticket prediction for Draw #{nextDrawPrediction.nextDrawNumber}
           </p>
           <p class="text-sm text-zinc-700">
             Based on completed run #{nextDrawPrediction.runId}, using latest
             known draw #{nextDrawPrediction.basedOnDrawNumber} ({nextDrawPrediction.basedOnDrawDate}).
+            The same six-number ticket applies to both Round 1 and Round 2.
           </p>
           {#if pinnedPredictionRunId}
             <p class="mt-1 text-xs font-semibold text-emerald-800">

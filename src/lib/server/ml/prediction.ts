@@ -6,7 +6,7 @@ import { and, desc, eq, isNotNull } from "drizzle-orm";
 import { db } from "$lib/server/db";
 import { nnTrainingRuns } from "$lib/server/db/schema";
 
-import { loadParsedDraws } from "./data";
+import { buildDrawEventHistory, loadParsedDraws } from "./data";
 import {
   buildInputVector,
   buildMultiHotInputVector,
@@ -57,7 +57,6 @@ export type NextDrawPrediction = {
   randomPredictedNumbers: number[];
   ensembleWeights: EnsembleWeights;
   generatedAt: string;
-  drawRound: number;
 };
 
 function buildInferenceModel(params: {
@@ -106,18 +105,14 @@ function buildInputVectorFromLatest(
   maxNumber: number,
   outputNumbers: number[],
   inputEncoding: "sorted_scalar_v1" | "windowed_multi_hot_v1",
-  drawRound = 1,
 ): {
   input: number[];
   latestWindow: ReturnType<typeof loadParsedDraws>;
   latestDrawNumber: number;
   latestDrawDate: string;
   numbersPerDraw: number;
-  drawRound: number;
 } {
-  const ordered = parsedDraws.filter((draw) => draw.drawRound === drawRound).sort(
-    (a, b) => a.drawDate.getTime() - b.drawDate.getTime(),
-  );
+  const ordered = buildDrawEventHistory(parsedDraws);
 
   if (ordered.length < windowSize) {
     throw new Error("Not enough draws available for next-draw prediction.");
@@ -135,13 +130,11 @@ function buildInputVectorFromLatest(
     latestDrawNumber: latestDraw.drawNumber,
     latestDrawDate: latestDraw.drawDate.toISOString().slice(0, 10),
     numbersPerDraw: latestDraw.winningNumbers.length,
-    drawRound,
   };
 }
 
 export async function getNextDrawPrediction(
   preferredRunId?: number,
-  drawRound = 1,
 ): Promise<NextDrawPrediction | null> {
   const run = preferredRunId
     ? db
@@ -216,7 +209,6 @@ export async function getNextDrawPrediction(
     maxNumber,
     artifact.outputNumbers,
     artifact.inputEncoding ?? "sorted_scalar_v1",
-    drawRound,
   );
 
   let model: tf.Sequential | null = null;
@@ -327,7 +319,6 @@ export async function getNextDrawPrediction(
       randomPredictedNumbers,
       ensembleWeights: artifact.ensembleWeights ?? DEFAULT_ENSEMBLE_WEIGHTS,
       generatedAt: new Date().toISOString(),
-      drawRound: inferenceInput.drawRound,
     };
   } finally {
     predictionTensor?.dispose();
