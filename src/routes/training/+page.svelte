@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { browser } from "$app/environment";
   import { enhance } from "$app/forms";
   import { invalidateAll } from "$app/navigation";
   import { onDestroy } from "svelte";
@@ -103,6 +104,8 @@
   let predictionRunInput = $state("");
   let trainingConfigInitialized = $state(false);
 
+  const TRAINING_FORM_STORAGE_KEY = "lottery_training_form_v1";
+
   const recommendedConfig = $derived(recommendation.recommendedConfig ?? null);
 
   $effect(() => {
@@ -119,17 +122,51 @@
 
   $effect(() => {
     if (trainingConfigInitialized) return;
-    holdoutWeeksInput = String(defaults.holdoutWeeks);
-    windowSizeInput = String(recommendedConfig?.windowSize ?? defaults.windowSize);
-    epochsInput = String(recommendedConfig?.epochs ?? defaults.epochs);
-    batchSizeInput = String(recommendedConfig?.batchSize ?? defaults.batchSize);
-    learningRateInput = String(recommendedConfig?.learningRate ?? defaults.learningRate);
-    dropoutRateInput = String(recommendedConfig?.dropoutRate ?? defaults.dropoutRate);
-    positiveClassWeightInput = String(defaults.positiveClassWeight);
-    earlyStoppingPatienceInput = String(defaults.earlyStoppingPatience);
-    earlyStoppingMinDeltaInput = String(defaults.earlyStoppingMinDelta);
-    trainingSeedInput = String(defaults.trainingSeed);
+    let saved: Record<string, unknown> | null = null;
+    if (browser) {
+      try {
+        saved = JSON.parse(localStorage.getItem(TRAINING_FORM_STORAGE_KEY) ?? "null") as Record<string, unknown> | null;
+      } catch {
+        localStorage.removeItem(TRAINING_FORM_STORAGE_KEY);
+      }
+    }
+
+    const savedString = (key: string, fallback: string) =>
+      typeof saved?.[key] === "string" ? saved[key] as string : fallback;
+    const savedPreset = savedString("selectedPreset", "medium");
+    selectedPreset = ["small", "medium", "large", "xlarge"].includes(savedPreset)
+      ? savedPreset
+      : "medium";
+    customHiddenLayersText = savedString("customHiddenLayersText", "");
+    holdoutWeeksInput = savedString("holdoutWeeksInput", String(defaults.holdoutWeeks));
+    windowSizeInput = savedString("windowSizeInput", String(recommendedConfig?.windowSize ?? defaults.windowSize));
+    epochsInput = savedString("epochsInput", String(recommendedConfig?.epochs ?? defaults.epochs));
+    batchSizeInput = savedString("batchSizeInput", String(recommendedConfig?.batchSize ?? defaults.batchSize));
+    learningRateInput = savedString("learningRateInput", String(recommendedConfig?.learningRate ?? defaults.learningRate));
+    dropoutRateInput = savedString("dropoutRateInput", String(recommendedConfig?.dropoutRate ?? defaults.dropoutRate));
+    positiveClassWeightInput = savedString("positiveClassWeightInput", String(defaults.positiveClassWeight));
+    earlyStoppingPatienceInput = savedString("earlyStoppingPatienceInput", String(defaults.earlyStoppingPatience));
+    earlyStoppingMinDeltaInput = savedString("earlyStoppingMinDeltaInput", String(defaults.earlyStoppingMinDelta));
+    trainingSeedInput = savedString("trainingSeedInput", String(defaults.trainingSeed));
     trainingConfigInitialized = true;
+  });
+
+  $effect(() => {
+    if (!browser || !trainingConfigInitialized) return;
+    localStorage.setItem(TRAINING_FORM_STORAGE_KEY, JSON.stringify({
+      selectedPreset,
+      customHiddenLayersText,
+      holdoutWeeksInput,
+      windowSizeInput,
+      epochsInput,
+      batchSizeInput,
+      learningRateInput,
+      dropoutRateInput,
+      positiveClassWeightInput,
+      earlyStoppingPatienceInput,
+      earlyStoppingMinDeltaInput,
+      trainingSeedInput,
+    }));
   });
 
   const preserveCreateRunValues: SubmitFunction = () => {
