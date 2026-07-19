@@ -11,6 +11,7 @@ import {
   buildInputVector,
   buildMultiHotInputVector,
   buildRecentFrequencyScores,
+  LOTTERY_TICKET_SIZE,
   pickTopKNumbers,
 } from "./features";
 import { buildHeuristicScores } from "./heuristic";
@@ -129,7 +130,7 @@ function buildInputVectorFromLatest(
     latestWindow,
     latestDrawNumber: latestDraw.drawNumber,
     latestDrawDate: latestDraw.drawDate.toISOString().slice(0, 10),
-    numbersPerDraw: latestDraw.winningNumbers.length,
+    numbersPerDraw: LOTTERY_TICKET_SIZE,
   };
 }
 

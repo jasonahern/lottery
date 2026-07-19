@@ -1,6 +1,7 @@
 import type { ParsedDraw } from "./data";
 
 export const FREQUENCY_PRIOR_WEIGHT = 0.15;
+export const LOTTERY_TICKET_SIZE = 6;
 
 export function canonicalizeNumbers(numbers: number[]): number[] {
   return [...numbers].sort((a, b) => a - b);

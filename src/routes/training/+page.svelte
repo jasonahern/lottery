@@ -2,6 +2,7 @@
   import { enhance } from "$app/forms";
   import { invalidateAll } from "$app/navigation";
   import { onDestroy } from "svelte";
+  import type { SubmitFunction } from "@sveltejs/kit";
 
   import { Badge } from "$lib/components/ui/badge";
   import { Button } from "$lib/components/ui/button";
@@ -95,34 +96,11 @@
   let dropoutRateInput = $state("");
   let policyModeInput = $state("");
   let predictionRunInput = $state("");
+  let trainingConfigInitialized = $state(false);
 
   const recommendedConfig = $derived(recommendation.recommendedConfig ?? null);
 
   $effect(() => {
-    if (!holdoutWeeksInput) {
-      holdoutWeeksInput = String(defaults.holdoutWeeks);
-    }
-
-    if (!windowSizeInput) {
-      windowSizeInput = String(defaults.windowSize);
-    }
-
-    if (!epochsInput) {
-      epochsInput = String(defaults.epochs);
-    }
-
-    if (!batchSizeInput) {
-      batchSizeInput = String(defaults.batchSize);
-    }
-
-    if (!learningRateInput) {
-      learningRateInput = String(defaults.learningRate);
-    }
-
-    if (!dropoutRateInput) {
-      dropoutRateInput = String(defaults.dropoutRate);
-    }
-
     if (!policyModeInput) {
       policyModeInput = feedbackStatus.mode;
     }
@@ -135,16 +113,21 @@
   });
 
   $effect(() => {
-    if (!recommendedConfig) {
-      return;
-    }
-
-    windowSizeInput = String(recommendedConfig.windowSize);
-    epochsInput = String(recommendedConfig.epochs);
-    batchSizeInput = String(recommendedConfig.batchSize);
-    learningRateInput = String(recommendedConfig.learningRate);
-    dropoutRateInput = String(recommendedConfig.dropoutRate);
+    if (trainingConfigInitialized) return;
+    holdoutWeeksInput = String(defaults.holdoutWeeks);
+    windowSizeInput = String(recommendedConfig?.windowSize ?? defaults.windowSize);
+    epochsInput = String(recommendedConfig?.epochs ?? defaults.epochs);
+    batchSizeInput = String(recommendedConfig?.batchSize ?? defaults.batchSize);
+    learningRateInput = String(recommendedConfig?.learningRate ?? defaults.learningRate);
+    dropoutRateInput = String(recommendedConfig?.dropoutRate ?? defaults.dropoutRate);
+    trainingConfigInitialized = true;
   });
+
+  const preserveCreateRunValues: SubmitFunction = () => {
+    return async ({ update }) => {
+      await update({ reset: false });
+    };
+  };
 
   $effect(() => {
     predictionRunInput = pinnedPredictionRunId
@@ -501,7 +484,8 @@
         class="mb-4 rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-900"
       >
         <p class="font-semibold">
-          Recommended values were auto-applied from Capacity Recommendation.
+          Initial recommended values were applied when this page opened. Your
+          edits remain unchanged after creating a run.
         </p>
         <p class="mt-1">
           Window {recommendedConfig.windowSize}, Epochs {recommendedConfig.epochs},
@@ -553,7 +537,7 @@
       </p>
     </div>
 
-    <form method="POST" action="?/createRun" use:enhance>
+    <form method="POST" action="?/createRun" use:enhance={preserveCreateRunValues}>
       <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <label class="space-y-1 text-sm font-medium text-zinc-700">
           Preset

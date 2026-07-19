@@ -10,6 +10,7 @@ import {
   canonicalizeNumbers,
   pickSeededRandomNumbers,
   pickTopKNumbers,
+  LOTTERY_TICKET_SIZE,
 } from "./features";
 import type { ParsedDraw } from "./data";
 
@@ -53,6 +54,11 @@ test("buildNumberVocabulary includes every possible number up to observed max", 
 
 test("pickTopKNumbers uses lower numbers as deterministic tie-breakers", () => {
   assert.deepEqual(pickTopKNumbers([0.5, 0.5, 0.1], [2, 1, 3], 2), [1, 2]);
+});
+
+test("ticket size remains six regardless of multi-round result size", () => {
+  assert.equal(LOTTERY_TICKET_SIZE, 6);
+  assert.equal(pickTopKNumbers(Array(12).fill(1), Array.from({ length: 12 }, (_, i) => i + 1), LOTTERY_TICKET_SIZE).length, 6);
 });
 
 test("blendScores adds a bounded recent-frequency prior", () => {
