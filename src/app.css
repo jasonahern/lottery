@@ -1,0 +1,24 @@
+@import "tailwindcss";
+
+:root {
+  --app-bg-a: #f0f9ff;
+  --app-bg-b: #ecfeff;
+  --app-bg-c: #f8fafc;
+}
+
+body {
+  min-height: 100vh;
+  background:
+    radial-gradient(
+      circle at 10% 0%,
+      color-mix(in oklab, var(--app-bg-a) 70%, white),
+      transparent 48%
+    ),
+    radial-gradient(
+      circle at 90% 0%,
+      color-mix(in oklab, var(--app-bg-b) 75%, white),
+      transparent 52%
+    ),
+    linear-gradient(180deg, var(--app-bg-c), #ffffff);
+  color: #0f172a;
+}

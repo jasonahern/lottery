@@ -1,0 +1,76 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1784056671546,
+      "tag": "0000_optimal_vindicator",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1784142888179,
+      "tag": "0001_organic_iron_man",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1784143411131,
+      "tag": "0002_eager_doctor_spectrum",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1784146340028,
+      "tag": "0003_absent_tigra",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1784217600000,
+      "tag": "0004_solid_feedback_loop",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1784221200000,
+      "tag": "0005_policy_settings_runtime_switch",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1784394000000,
+      "tag": "0006_baseline_results_and_draw_metadata",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1784480400000,
+      "tag": "0007_prediction_evaluations",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1784566800000,
+      "tag": "0008_medical_blazing_skull",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1784653200000,
+      "tag": "0009_overconfident_kid_colt",
+      "breakpoints": true
+    }
+  ]
+}
