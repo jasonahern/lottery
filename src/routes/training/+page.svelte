@@ -94,6 +94,10 @@
   let batchSizeInput = $state("");
   let learningRateInput = $state("");
   let dropoutRateInput = $state("");
+  let positiveClassWeightInput = $state("");
+  let earlyStoppingPatienceInput = $state("");
+  let earlyStoppingMinDeltaInput = $state("");
+  let trainingSeedInput = $state("");
   let policyModeInput = $state("");
   let predictionRunInput = $state("");
   let trainingConfigInitialized = $state(false);
@@ -120,6 +124,10 @@
     batchSizeInput = String(recommendedConfig?.batchSize ?? defaults.batchSize);
     learningRateInput = String(recommendedConfig?.learningRate ?? defaults.learningRate);
     dropoutRateInput = String(recommendedConfig?.dropoutRate ?? defaults.dropoutRate);
+    positiveClassWeightInput = String(defaults.positiveClassWeight);
+    earlyStoppingPatienceInput = String(defaults.earlyStoppingPatience);
+    earlyStoppingMinDeltaInput = String(defaults.earlyStoppingMinDelta);
+    trainingSeedInput = String(defaults.trainingSeed);
     trainingConfigInitialized = true;
   });
 
@@ -535,6 +543,14 @@
         Dropout rate: regularization strength. Higher reduces overfitting but
         too high can underfit.
       </p>
+      <p class="mt-1 text-xs">
+        Positive-class weight: how strongly the loss emphasizes numbers that
+        were actually drawn. Lower values are less aggressive.
+      </p>
+      <p class="mt-1 text-xs">
+        Early stopping / seed: controls when training stops after validation
+        stalls and makes repeated runs reproducible.
+      </p>
     </div>
 
     <form method="POST" action="?/createRun" use:enhance={preserveCreateRunValues}>
@@ -661,6 +677,70 @@
           <p class="text-xs font-normal text-zinc-500">
             Regularization level. Raise to fight overfitting; lower if model
             underfits.
+          </p>
+        </label>
+
+        <label class="space-y-1 text-sm font-medium text-zinc-700">
+          Positive-class weight
+          <input
+            type="number"
+            name="positiveClassWeight"
+            min="0.1"
+            max="20"
+            step="0.1"
+            bind:value={positiveClassWeightInput}
+            class="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-900 shadow-sm focus:border-zinc-500 focus:outline-none"
+          />
+          <p class="text-xs font-normal text-zinc-500">
+            Try 3.0 for the next run. The class-balance default is {defaults.positiveClassWeight.toFixed(2)}.
+          </p>
+        </label>
+
+        <label class="space-y-1 text-sm font-medium text-zinc-700">
+          Early-stopping patience
+          <input
+            type="number"
+            name="earlyStoppingPatience"
+            min="1"
+            max="100"
+            step="1"
+            bind:value={earlyStoppingPatienceInput}
+            class="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-900 shadow-sm focus:border-zinc-500 focus:outline-none"
+          />
+          <p class="text-xs font-normal text-zinc-500">
+            Epochs allowed without meaningful validation improvement. Try 8.
+          </p>
+        </label>
+
+        <label class="space-y-1 text-sm font-medium text-zinc-700">
+          Minimum improvement
+          <input
+            type="number"
+            name="earlyStoppingMinDelta"
+            min="0.000001"
+            max="1"
+            step="0.000001"
+            bind:value={earlyStoppingMinDeltaInput}
+            class="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-900 shadow-sm focus:border-zinc-500 focus:outline-none"
+          />
+          <p class="text-xs font-normal text-zinc-500">
+            Smallest validation-loss reduction counted as progress. Try 0.00005.
+          </p>
+        </label>
+
+        <label class="space-y-1 text-sm font-medium text-zinc-700">
+          Training seed
+          <input
+            type="number"
+            name="trainingSeed"
+            min="1"
+            max="2147483646"
+            step="1"
+            bind:value={trainingSeedInput}
+            class="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-900 shadow-sm focus:border-zinc-500 focus:outline-none"
+          />
+          <p class="text-xs font-normal text-zinc-500">
+            Reproduces initialization and dropout randomness. Start with 42.
           </p>
         </label>
       </div>

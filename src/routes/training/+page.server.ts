@@ -306,6 +306,22 @@ export const actions: Actions = {
         batchSize: submittedConfig.batchSize,
         learningRate: submittedConfig.learningRate,
         dropoutRate: submittedConfig.dropoutRate,
+        positiveClassWeight: coercePositiveNumber(
+          form.get("positiveClassWeight"),
+          DEFAULT_TRAINING_CONFIG.positiveClassWeight,
+        ),
+        earlyStoppingPatience: coercePositiveInt(
+          form.get("earlyStoppingPatience"),
+          DEFAULT_TRAINING_CONFIG.earlyStoppingPatience,
+        ),
+        earlyStoppingMinDelta: coercePositiveNumber(
+          form.get("earlyStoppingMinDelta"),
+          DEFAULT_TRAINING_CONFIG.earlyStoppingMinDelta,
+        ),
+        trainingSeed: coercePositiveInt(
+          form.get("trainingSeed"),
+          DEFAULT_TRAINING_CONFIG.trainingSeed,
+        ),
         hiddenLayers,
       });
 
