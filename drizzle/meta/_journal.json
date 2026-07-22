@@ -71,6 +71,20 @@
       "when": 1784653200000,
       "tag": "0009_overconfident_kid_colt",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1784491973387,
+      "tag": "0010_bouncy_spectrum",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1784746610123,
+      "tag": "0011_aspiring_natasha_romanoff",
+      "breakpoints": true
     }
   ]
 }

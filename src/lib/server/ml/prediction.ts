@@ -7,6 +7,7 @@ import { db } from "$lib/server/db";
 import { nnTrainingRuns } from "$lib/server/db/schema";
 
 import { buildDrawEventHistory, loadParsedDraws } from "./data";
+import type { ReliabilityGateDiagnostics } from "./backtest";
 import {
   buildInputVector,
   buildMultiHotInputVector,
@@ -42,12 +43,7 @@ type SerializedModelArtifact = {
   }>;
   ensembleWeights?: EnsembleWeights;
   ensembleVersion?: string;
-  ensembleReliability?: {
-    selectedMethod: "ensemble" | "neural";
-    neuralAverageMatches: number;
-    ensembleAverageMatches: number;
-    gateSampleCount: number;
-  };
+  ensembleReliability?: ReliabilityGateDiagnostics;
   inputEncoding?: "sorted_scalar_v1" | "windowed_multi_hot_v1";
   lossVersion?: string;
   trainingSeed?: number;

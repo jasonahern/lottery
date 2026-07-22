@@ -9,6 +9,7 @@ import { nnTrainingRuns } from "$lib/server/db/schema";
 
 import { clearArtifactPathsForRuns, getRunsForArtifactCleanup } from "./runs";
 import type { EnsembleWeights } from "./ensemble";
+import type { ReliabilityGateDiagnostics } from "./backtest";
 
 const ARTIFACT_DIR = resolve(process.cwd(), "artifacts", "nn-runs");
 
@@ -29,12 +30,7 @@ export type SerializedModelArtifact = {
   weights: SerializableWeight[];
   ensembleWeights?: EnsembleWeights;
   ensembleVersion?: string;
-  ensembleReliability?: {
-    selectedMethod: "ensemble" | "neural";
-    neuralAverageMatches: number;
-    ensembleAverageMatches: number;
-    gateSampleCount: number;
-  };
+  ensembleReliability?: ReliabilityGateDiagnostics;
   inputEncoding?: "sorted_scalar_v1" | "windowed_multi_hot_v1";
   lossVersion?: string;
   trainingSeed?: number;

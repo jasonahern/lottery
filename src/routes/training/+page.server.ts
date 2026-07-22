@@ -27,6 +27,7 @@ import {
   getRunDetail,
   getRunProgress,
   getTrainingRunFormConfig,
+  setRunFavorite,
   type RunSummary,
 } from "$lib/server/ml/runs";
 import { getNextDrawPrediction } from "$lib/server/ml/prediction";
@@ -138,6 +139,24 @@ export const load = async ({ url }) => {
 };
 
 export const actions: Actions = {
+  setRunFavorite: async ({ request }) => {
+    const form = await request.formData();
+    const runId = Number(form.get("runId"));
+    const isFavorite = form.get("isFavorite") === "true";
+    if (!Number.isInteger(runId) || runId <= 0) {
+      return fail(400, { success: false, favoriteMessage: "Invalid run." });
+    }
+    if (!setRunFavorite(runId, isFavorite)) {
+      return fail(404, { success: false, favoriteMessage: `Run #${runId} was not found.` });
+    }
+    return {
+      success: true,
+      favoriteMessage: isFavorite
+        ? `Run #${runId} added to favourites.`
+        : `Run #${runId} removed from favourites.`,
+    };
+  },
+
   setPredictionRun: async ({ request }) => {
     const form = await request.formData();
     const runId = Number(form.get("predictionRunId"));
@@ -327,6 +346,14 @@ export const actions: Actions = {
           form.get("trainingSeed"),
           DEFAULT_TRAINING_CONFIG.trainingSeed,
         ),
+        enableRollingBacktest: form.get("enableRollingBacktest") === "on",
+        rollingFolds: coercePositiveInt(form.get("rollingFolds"), DEFAULT_TRAINING_CONFIG.rollingFolds),
+        rollingHoldoutWeeks: coercePositiveInt(form.get("rollingHoldoutWeeks"), DEFAULT_TRAINING_CONFIG.rollingHoldoutWeeks),
+        minimumTrainingWeeks: coercePositiveInt(form.get("minimumTrainingWeeks"), DEFAULT_TRAINING_CONFIG.minimumTrainingWeeks),
+        reliabilityConfidenceLevel: coercePositiveNumber(form.get("reliabilityConfidenceLevel"), DEFAULT_TRAINING_CONFIG.reliabilityConfidenceLevel),
+        reliabilityMinimumAdvantage: coerceNonNegativeNumber(form.get("reliabilityMinimumAdvantage"), DEFAULT_TRAINING_CONFIG.reliabilityMinimumAdvantage),
+        reliabilityMinimumGroups: coercePositiveInt(form.get("reliabilityMinimumGroups"), DEFAULT_TRAINING_CONFIG.reliabilityMinimumGroups),
+        reliabilityBootstrapIterations: coercePositiveInt(form.get("reliabilityBootstrapIterations"), DEFAULT_TRAINING_CONFIG.reliabilityBootstrapIterations),
         hiddenLayers,
       });
 

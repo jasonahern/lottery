@@ -17,6 +17,14 @@ export type TrainingConfig = {
   positiveClassWeight: number;
   earlyStoppingPatience: number;
   earlyStoppingMinDelta: number;
+  enableRollingBacktest: boolean;
+  rollingFolds: number;
+  rollingHoldoutWeeks: number;
+  minimumTrainingWeeks: number;
+  reliabilityConfidenceLevel: number;
+  reliabilityMinimumAdvantage: number;
+  reliabilityMinimumGroups: number;
+  reliabilityBootstrapIterations: number;
 };
 
 export const DEFAULT_PROFILE_NAME = "balanced_v1";
@@ -43,6 +51,14 @@ export const DEFAULT_TRAINING_CONFIG: TrainingConfig = {
   positiveClassWeight: 53 / 6,
   earlyStoppingPatience: 12,
   earlyStoppingMinDelta: 0.0001,
+  enableRollingBacktest: false,
+  rollingFolds: 4,
+  rollingHoldoutWeeks: 8,
+  minimumTrainingWeeks: 104,
+  reliabilityConfidenceLevel: 0.95,
+  reliabilityMinimumAdvantage: 0.05,
+  reliabilityMinimumGroups: 30,
+  reliabilityBootstrapIterations: 2000,
 };
 
 export const MAX_TRAINING_LIMITS = {
@@ -159,6 +175,14 @@ export function validateTrainingConfig(config: TrainingConfig): string[] {
   if (!isFinitePositiveNumber(config.earlyStoppingMinDelta)) {
     errors.push("earlyStoppingMinDelta must be a positive number.");
   }
+  if (typeof config.enableRollingBacktest !== "boolean") errors.push("enableRollingBacktest must be boolean.");
+  if (!isFinitePositiveInteger(config.rollingFolds) || config.rollingFolds > 10) errors.push("rollingFolds must be between 1 and 10.");
+  if (!isFinitePositiveInteger(config.rollingHoldoutWeeks)) errors.push("rollingHoldoutWeeks must be a positive integer.");
+  if (!isFinitePositiveInteger(config.minimumTrainingWeeks)) errors.push("minimumTrainingWeeks must be a positive integer.");
+  if (!(config.reliabilityConfidenceLevel > 0 && config.reliabilityConfidenceLevel < 1)) errors.push("reliabilityConfidenceLevel must be between 0 and 1.");
+  if (!(config.reliabilityMinimumAdvantage >= 0)) errors.push("reliabilityMinimumAdvantage must be non-negative.");
+  if (!isFinitePositiveInteger(config.reliabilityMinimumGroups)) errors.push("reliabilityMinimumGroups must be a positive integer.");
+  if (!isFinitePositiveInteger(config.reliabilityBootstrapIterations) || config.reliabilityBootstrapIterations > 10000) errors.push("reliabilityBootstrapIterations must be between 1 and 10000.");
 
   if (
     config.currentEraStartDate !== null &&

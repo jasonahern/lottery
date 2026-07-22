@@ -5,6 +5,7 @@ import {
   lotteryDraws,
   lotteryEntries,
   nnEpochMetrics,
+  nnBacktestFolds,
   nnPredictionEvaluations,
   nnTestResults,
   nnTrainingRuns,
@@ -36,6 +37,10 @@ export type RunSummary = {
   roundsRemaining: number;
   holdoutWeeks: number;
   hiddenLayers: number[];
+  isFavorite: boolean;
+  currentPhase: string;
+  currentFold: number;
+  totalFolds: number;
   paramCount: number | null;
   holdoutScore: number | null;
   finalTrainLoss: number | null;
@@ -79,6 +84,7 @@ export type RunDetail = {
   epochMetrics: RunEpochMetric[];
   testResults: RunTestResult[];
   methodSummaries: PredictionEvaluationSummary[];
+  backtestFolds: BacktestFoldResult[];
 };
 
 export type PredictionMethod =
@@ -117,6 +123,9 @@ export type RunComparisonSummary = {
   modelVsRandom: number | null;
   modelVsHeuristic: number | null;
   winner: PredictionMethod | null;
+  rollingMean: number | null;
+  rollingWorst: number | null;
+  rollingFolds: number;
 };
 
 export type DatasetStats = {
@@ -134,11 +143,34 @@ export type PredictionRunCandidate = {
   paramCount: number | null;
   hiddenLayers: number[];
   windowSize: number;
+  isFavorite: boolean;
 };
 
 export type TrainingRunFormConfig = TrainingConfig & {
   runId: number;
   status: string;
+};
+
+export type BacktestFoldResult = {
+  fold: number;
+  trainStartDate: string;
+  trainEndDate: string;
+  calibrationStartDate: string;
+  calibrationEndDate: string;
+  holdoutStartDate: string;
+  holdoutEndDate: string;
+  trainSamples: number;
+  calibrationSamples: number;
+  holdoutSamples: number;
+  bestEpoch: number | null;
+  finalTrainLoss: number | null;
+  finalValLoss: number | null;
+  neuralScore: number;
+  ensembleScore: number;
+  gatedScore: number;
+  randomScore: number;
+  selectedMethod: string;
+  diagnostics: Record<string, unknown>;
 };
 
 function estimateParamCount(
@@ -245,8 +277,11 @@ export function createTrainingRun(
       currentEpoch: 0,
       trainSamples: trainSamples.length,
       testSamples: testSamples.length,
-      samplesTotal: trainSamples.length * config.epochs,
+      samplesTotal: trainSamples.length * config.epochs * (config.enableRollingBacktest ? config.rollingFolds + 1 : 1),
       samplesProcessed: 0,
+      currentPhase: "final_training",
+      currentFold: 0,
+      totalFolds: config.enableRollingBacktest ? config.rollingFolds : 0,
       modelFamily: config.modelFamily,
       inputEncoding: "windowed_multi_hot_v1",
       lossVersion: "weighted_bce_v1",
@@ -265,6 +300,10 @@ export function createTrainingRun(
       samplesTotal: nnTrainingRuns.samplesTotal,
       holdoutWeeks: nnTrainingRuns.holdoutWeeks,
       hiddenLayersJson: nnTrainingRuns.hiddenLayersJson,
+      isFavorite: nnTrainingRuns.isFavorite,
+      currentPhase: nnTrainingRuns.currentPhase,
+      currentFold: nnTrainingRuns.currentFold,
+      totalFolds: nnTrainingRuns.totalFolds,
       createdAt: nnTrainingRuns.createdAt,
       startedAt: nnTrainingRuns.startedAt,
       endedAt: nnTrainingRuns.endedAt,
@@ -286,6 +325,10 @@ export function createTrainingRun(
     roundsRemaining: Math.max(0, inserted.totalEpochs - inserted.currentEpoch),
     holdoutWeeks: inserted.holdoutWeeks,
     hiddenLayers: JSON.parse(inserted.hiddenLayersJson) as number[],
+    isFavorite: inserted.isFavorite,
+    currentPhase: inserted.currentPhase,
+    currentFold: inserted.currentFold,
+    totalFolds: inserted.totalFolds,
     paramCount,
     holdoutScore: null,
     finalTrainLoss: null,
@@ -312,7 +355,7 @@ export function markRunFailed(runId: number, errorMessage: string): void {
 
 export function markRunCompleted(runId: number): void {
   db.update(nnTrainingRuns)
-    .set({ status: "completed", endedAt: new Date() })
+    .set({ status: "completed", endedAt: new Date(), currentPhase: "completed", currentFold: 0 })
     .where(eq(nnTrainingRuns.id, runId))
     .run();
 }
@@ -437,6 +480,10 @@ export function getLatestRuns(limit = 20): RunSummary[] {
       samplesTotal: nnTrainingRuns.samplesTotal,
       holdoutWeeks: nnTrainingRuns.holdoutWeeks,
       hiddenLayersJson: nnTrainingRuns.hiddenLayersJson,
+      isFavorite: nnTrainingRuns.isFavorite,
+      currentPhase: nnTrainingRuns.currentPhase,
+      currentFold: nnTrainingRuns.currentFold,
+      totalFolds: nnTrainingRuns.totalFolds,
       paramCount: nnTrainingRuns.paramCount,
       holdoutScore: nnTrainingRuns.holdoutScore,
       finalTrainLoss: nnTrainingRuns.finalTrainLoss,
@@ -461,6 +508,10 @@ export function getLatestRuns(limit = 20): RunSummary[] {
     roundsRemaining: Math.max(0, run.totalEpochs - run.currentEpoch),
     holdoutWeeks: run.holdoutWeeks,
     hiddenLayers: JSON.parse(run.hiddenLayersJson) as number[],
+    isFavorite: run.isFavorite,
+    currentPhase: run.currentPhase,
+    currentFold: run.currentFold,
+    totalFolds: run.totalFolds,
     paramCount: run.paramCount,
     holdoutScore: parseNullableNumber(run.holdoutScore),
     finalTrainLoss: parseNullableNumber(run.finalTrainLoss),
@@ -481,6 +532,7 @@ export function getPredictionRunCandidates(
       holdoutScore: nnTrainingRuns.holdoutScore,
       paramCount: nnTrainingRuns.paramCount,
       hiddenLayersJson: nnTrainingRuns.hiddenLayersJson,
+      isFavorite: nnTrainingRuns.isFavorite,
       windowSize: nnTrainingRuns.windowSize,
     })
     .from(nnTrainingRuns)
@@ -501,6 +553,7 @@ export function getPredictionRunCandidates(
     paramCount: row.paramCount,
     hiddenLayers: JSON.parse(row.hiddenLayersJson) as number[],
     windowSize: row.windowSize,
+    isFavorite: row.isFavorite,
   }));
 }
 
@@ -516,6 +569,10 @@ export function getRunProgress(runId: number): RunSummary | null {
       samplesTotal: nnTrainingRuns.samplesTotal,
       holdoutWeeks: nnTrainingRuns.holdoutWeeks,
       hiddenLayersJson: nnTrainingRuns.hiddenLayersJson,
+      isFavorite: nnTrainingRuns.isFavorite,
+      currentPhase: nnTrainingRuns.currentPhase,
+      currentFold: nnTrainingRuns.currentFold,
+      totalFolds: nnTrainingRuns.totalFolds,
       paramCount: nnTrainingRuns.paramCount,
       holdoutScore: nnTrainingRuns.holdoutScore,
       finalTrainLoss: nnTrainingRuns.finalTrainLoss,
@@ -543,6 +600,10 @@ export function getRunProgress(runId: number): RunSummary | null {
     roundsRemaining: Math.max(0, run.totalEpochs - run.currentEpoch),
     holdoutWeeks: run.holdoutWeeks,
     hiddenLayers: JSON.parse(run.hiddenLayersJson) as number[],
+    isFavorite: run.isFavorite,
+    currentPhase: run.currentPhase,
+    currentFold: run.currentFold,
+    totalFolds: run.totalFolds,
     paramCount: run.paramCount,
     holdoutScore: parseNullableNumber(run.holdoutScore),
     finalTrainLoss: parseNullableNumber(run.finalTrainLoss),
@@ -575,6 +636,45 @@ export function getTrainingRunFormConfig(runId: number): TrainingRunFormConfig |
     runId: row.id,
     status: row.status,
   };
+}
+
+export function setRunFavorite(runId: number, isFavorite: boolean): boolean {
+  const result = db
+    .update(nnTrainingRuns)
+    .set({ isFavorite })
+    .where(eq(nnTrainingRuns.id, runId))
+    .run();
+  return result.changes > 0;
+}
+
+export function updateBacktestProgress(runId: number, fold: number, totalFolds: number, samplesProcessed?: number): void {
+  db.update(nnTrainingRuns)
+    .set({ currentPhase: "rolling_backtest", currentFold: fold, totalFolds, samplesProcessed })
+    .where(eq(nnTrainingRuns.id, runId))
+    .run();
+}
+
+export function addBacktestFoldResult(runId: number, result: BacktestFoldResult): void {
+  db.insert(nnBacktestFolds).values({
+    runId, fold: result.fold,
+    trainStartDate: result.trainStartDate, trainEndDate: result.trainEndDate,
+    calibrationStartDate: result.calibrationStartDate, calibrationEndDate: result.calibrationEndDate,
+    holdoutStartDate: result.holdoutStartDate, holdoutEndDate: result.holdoutEndDate,
+    trainSamples: result.trainSamples, calibrationSamples: result.calibrationSamples,
+    holdoutSamples: result.holdoutSamples, bestEpoch: result.bestEpoch,
+    finalTrainLoss: result.finalTrainLoss === null ? null : String(result.finalTrainLoss),
+    finalValLoss: result.finalValLoss === null ? null : String(result.finalValLoss),
+    neuralScore: String(result.neuralScore), ensembleScore: String(result.ensembleScore),
+    gatedScore: String(result.gatedScore), randomScore: String(result.randomScore),
+    selectedMethod: result.selectedMethod, diagnosticsJson: JSON.stringify(result.diagnostics),
+  }).onConflictDoUpdate({
+    target: [nnBacktestFolds.runId, nnBacktestFolds.fold],
+    set: {
+      neuralScore: String(result.neuralScore), ensembleScore: String(result.ensembleScore),
+      gatedScore: String(result.gatedScore), randomScore: String(result.randomScore),
+      selectedMethod: result.selectedMethod, diagnosticsJson: JSON.stringify(result.diagnostics),
+    },
+  }).run();
 }
 
 export function getRunDetail(
@@ -628,6 +728,8 @@ export function getRunDetail(
     .from(nnPredictionEvaluations)
     .where(eq(nnPredictionEvaluations.runId, runId))
     .all();
+  const backtestRows = db.select().from(nnBacktestFolds)
+    .where(eq(nnBacktestFolds.runId, runId)).orderBy(asc(nnBacktestFolds.fold)).all();
 
   const evaluationsByDrawAndMethod = new Map<
     string,
@@ -785,6 +887,19 @@ export function getRunDetail(
       topKHit: row.topKHit,
     })),
     methodSummaries: getRunEvaluationSummaries(runId),
+    backtestFolds: backtestRows.map((row) => ({
+      fold: row.fold,
+      trainStartDate: row.trainStartDate, trainEndDate: row.trainEndDate,
+      calibrationStartDate: row.calibrationStartDate, calibrationEndDate: row.calibrationEndDate,
+      holdoutStartDate: row.holdoutStartDate, holdoutEndDate: row.holdoutEndDate,
+      trainSamples: row.trainSamples, calibrationSamples: row.calibrationSamples,
+      holdoutSamples: row.holdoutSamples, bestEpoch: row.bestEpoch,
+      finalTrainLoss: parseNullableNumber(row.finalTrainLoss), finalValLoss: parseNullableNumber(row.finalValLoss),
+      neuralScore: Number(row.neuralScore), ensembleScore: Number(row.ensembleScore),
+      gatedScore: Number(row.gatedScore), randomScore: Number(row.randomScore),
+      selectedMethod: row.selectedMethod,
+      diagnostics: JSON.parse(row.diagnosticsJson) as Record<string, unknown>,
+    })),
   };
 }
 
@@ -957,6 +1072,11 @@ export function getRunComparisonSummaries(
   const runsWithEvaluations = new Set(
     evaluations.map((evaluation) => evaluation.runId),
   );
+  const backtestRows = db
+    .select({ runId: nnBacktestFolds.runId, gatedScore: nnBacktestFolds.gatedScore })
+    .from(nnBacktestFolds)
+    .where(inArray(nnBacktestFolds.runId, runs.map((run) => run.id)))
+    .all();
 
   return runs.map((run) => {
     const methodSummaries = runsWithEvaluations.has(run.id)
@@ -976,6 +1096,9 @@ export function getRunComparisonSummaries(
     const heuristicAverage = averageByMethod.get("heuristic") ?? null;
     const ensembleAverage = averageByMethod.get("ensemble") ?? null;
     const winner = methodSummaries[0]?.method ?? null;
+    const rollingScores = backtestRows
+      .filter((row) => row.runId === run.id)
+      .map((row) => Number(row.gatedScore));
 
     return {
       runId: run.id,
@@ -1002,6 +1125,11 @@ export function getRunComparisonSummaries(
           ? Number((modelAverage - heuristicAverage).toFixed(4))
           : null,
       winner,
+      rollingMean: rollingScores.length
+        ? rollingScores.reduce((sum, value) => sum + value, 0) / rollingScores.length
+        : null,
+      rollingWorst: rollingScores.length ? Math.min(...rollingScores) : null,
+      rollingFolds: rollingScores.length,
     };
   });
 }
@@ -1045,6 +1173,7 @@ export function getRunsForArtifactCleanup(
       and(
         eq(nnTrainingRuns.status, "completed"),
         eq(nnTrainingRuns.isValid, true),
+        eq(nnTrainingRuns.isFavorite, false),
         sql`${nnTrainingRuns.modelArtifactPath} IS NOT NULL`,
       ),
     )
@@ -1067,6 +1196,7 @@ export function getRunsForArtifactCleanup(
       and(
         eq(nnTrainingRuns.status, "completed"),
         eq(nnTrainingRuns.isValid, true),
+        eq(nnTrainingRuns.isFavorite, false),
         sql`${nnTrainingRuns.modelArtifactPath} IS NOT NULL`,
       ),
     )

@@ -30,22 +30,20 @@ import { buildHeuristicScores, pickHeuristicNumbers } from "./heuristic";
 import {
   blendEnsembleScores,
   buildSeededRandomScores,
-  collapseDuplicateExpertWeights,
-  DEFAULT_ENSEMBLE_WEIGHTS,
-  type EnsembleMethod,
-  type EnsembleScores,
-  updateEnsembleWeights,
-  calculateCalibrationReward,
 } from "./ensemble";
 import {
   addPredictionEvaluations,
+  addBacktestFoldResult,
   addTestResult,
   markRunCompleted,
   markRunFailed,
   markRunRunning,
   updateRunEpochProgress,
+  updateBacktestProgress,
 } from "./runs";
 import { cleanupOldArtifacts, saveModelArtifact } from "./artifacts";
+import { calibrateEnsemble } from "./calibration";
+import { createRollingEventFolds } from "./backtest";
 
 type WindowedVectorSample = {
   input: number[];
@@ -208,6 +206,107 @@ function buildModel(
   return model;
 }
 
+async function runRollingBacktests(params: {
+  runId: number;
+  config: TrainingConfig;
+  samples: WindowedVectorSample[];
+  outputNumbers: number[];
+  baseProcessed: number;
+}): Promise<void> {
+  const calibrationGroups = Math.max(40, params.config.reliabilityMinimumGroups * 4);
+  const folds = createRollingEventFolds(
+    params.samples,
+    (sample) => sample.targetDrawDate,
+    {
+      minimumTrainGroups: params.config.minimumTrainingWeeks * 2,
+      calibrationGroups,
+      holdoutGroups: params.config.rollingHoldoutWeeks * 2,
+      folds: params.config.rollingFolds,
+    },
+  );
+  if (folds.length === 0) throw new Error("Not enough chronological history for rolling backtesting.");
+
+  for (const fold of folds) {
+    const inputSize = fold.train[0].input.length;
+    const outputSize = fold.train[0].targetMultiHot.length;
+    const xTrain = tf.tensor2d(fold.train.map((sample) => sample.input), [fold.train.length, inputSize]);
+    const yTrain = tf.tensor2d(fold.train.map((sample) => sample.targetMultiHot), [fold.train.length, outputSize]);
+    const xCalibration = tf.tensor2d(fold.calibration.map((sample) => sample.input), [fold.calibration.length, inputSize]);
+    const yCalibration = tf.tensor2d(fold.calibration.map((sample) => sample.targetMultiHot), [fold.calibration.length, outputSize]);
+    const model = buildModel(params.config, inputSize, outputSize);
+    let bestWeights: tf.Tensor[] | null = null;
+    let bestValLoss = Number.POSITIVE_INFINITY;
+    let bestEpoch: number | null = null;
+    let staleEpochs = 0;
+    let finalTrainLoss: number | null = null;
+    let finalValLoss: number | null = null;
+    try {
+      await model.fit(xTrain, yTrain, {
+        epochs: params.config.epochs, batchSize: params.config.batchSize, shuffle: false,
+        validationData: [xCalibration, yCalibration],
+        callbacks: { onEpochEnd: async (epoch, logs) => {
+          finalTrainLoss = typeof logs?.loss === "number" ? logs.loss : finalTrainLoss;
+          finalValLoss = typeof logs?.val_loss === "number" ? logs.val_loss : finalValLoss;
+          if (typeof logs?.val_loss === "number" && logs.val_loss < bestValLoss - params.config.earlyStoppingMinDelta) {
+            bestValLoss = logs.val_loss; bestEpoch = epoch + 1; staleEpochs = 0;
+            disposeWeights(bestWeights); bestWeights = model.getWeights().map((weight) => weight.clone());
+          } else if (++staleEpochs >= params.config.earlyStoppingPatience) model.stopTraining = true;
+          updateBacktestProgress(
+            params.runId, fold.fold, folds.length,
+            params.baseProcessed + (fold.fold - 1) * params.config.epochs * fold.train.length + (epoch + 1) * fold.train.length,
+          );
+        } },
+      });
+      if (bestWeights) model.setWeights(bestWeights);
+      const calibration = await calibrateEnsemble({
+        model, samples: fold.calibration, outputNumbers: params.outputNumbers, inputSize,
+        confidenceLevel: params.config.reliabilityConfidenceLevel,
+        minimumAdvantage: params.config.reliabilityMinimumAdvantage,
+        minimumGroups: params.config.reliabilityMinimumGroups,
+        bootstrapIterations: params.config.reliabilityBootstrapIterations,
+        seed: params.config.trainingSeed + 7000 + fold.fold,
+      });
+      let neuralTotal = 0, ensembleTotal = 0, gatedTotal = 0, randomTotal = 0;
+      for (const sample of fold.holdout) {
+        const input = tf.tensor2d([sample.input], [1, inputSize]);
+        const prediction = model.predict(input) as tf.Tensor;
+        const neuralScores = Array.from(await prediction.data());
+        const randomScores = buildSeededRandomScores(params.outputNumbers.length, sample.targetDrawNumber);
+        const components = {
+          neural: neuralScores,
+          frequency: buildRecentFrequencyScores(sample.inputWindow, params.outputNumbers),
+          heuristic: buildHeuristicScores(sample.inputWindow, params.outputNumbers),
+          random: randomScores,
+        };
+        neuralTotal += countMatches(pickTopKNumbers(neuralScores, params.outputNumbers, sample.targetNumbers.length), sample.targetNumbers);
+        ensembleTotal += countMatches(pickTopKNumbers(blendEnsembleScores(components, calibration.calibratedWeights), params.outputNumbers, sample.targetNumbers.length), sample.targetNumbers);
+        gatedTotal += countMatches(pickTopKNumbers(blendEnsembleScores(components, calibration.weights), params.outputNumbers, sample.targetNumbers.length), sample.targetNumbers);
+        randomTotal += countMatches(pickTopKNumbers(randomScores, params.outputNumbers, sample.targetNumbers.length), sample.targetNumbers);
+        input.dispose(); prediction.dispose();
+      }
+      const first = (items: WindowedVectorSample[]) => items[0].targetDrawDate;
+      const last = (items: WindowedVectorSample[]) => items.at(-1)!.targetDrawDate;
+      addBacktestFoldResult(params.runId, {
+        fold: fold.fold,
+        trainStartDate: first(fold.train), trainEndDate: last(fold.train),
+        calibrationStartDate: first(fold.calibration), calibrationEndDate: last(fold.calibration),
+        holdoutStartDate: first(fold.holdout), holdoutEndDate: last(fold.holdout),
+        trainSamples: fold.train.length, calibrationSamples: fold.calibration.length,
+        holdoutSamples: fold.holdout.length, bestEpoch, finalTrainLoss, finalValLoss,
+        neuralScore: neuralTotal / fold.holdout.length,
+        ensembleScore: ensembleTotal / fold.holdout.length,
+        gatedScore: gatedTotal / fold.holdout.length,
+        randomScore: randomTotal / fold.holdout.length,
+        selectedMethod: calibration.diagnostics.selectedMethod,
+        diagnostics: calibration.diagnostics as unknown as Record<string, unknown>,
+      });
+    } finally {
+      xTrain.dispose(); yTrain.dispose(); xCalibration.dispose(); yCalibration.dispose();
+      model.dispose(); disposeWeights(bestWeights);
+    }
+  }
+}
+
 async function runTrainingJob(runId: number): Promise<void> {
   const config = getRunConfig(runId);
   const { trainingSamples, holdoutSamples, outputNumbers } =
@@ -290,92 +389,16 @@ async function runTrainingJob(runId: number): Promise<void> {
     }
 
     let totalMatches = 0;
-    const gateSampleCount = Math.max(1, Math.floor(calibrationSamples.length * 0.25));
-    const weightLearningSamples = calibrationSamples.slice(0, -gateSampleCount);
-    const reliabilityGateSamples = calibrationSamples.slice(-gateSampleCount);
-    const learningRecords: Array<{
-      scores: EnsembleScores;
-      targetNumbers: number[];
-    }> = [];
-
-    // Score the chronological weight-learning partition first so duplicate
-    // experts can be removed across the entire partition before any updates.
-    for (const sample of weightLearningSamples) {
-      const inputTensor = tf.tensor2d([sample.input], [1, inputSize]);
-      const prediction = model.predict(inputTensor) as tf.Tensor;
-      const scores = Array.from(await prediction.data());
-      const frequencyScores = buildRecentFrequencyScores(sample.inputWindow, outputNumbers);
-      const heuristicScores = buildHeuristicScores(sample.inputWindow, outputNumbers);
-      learningRecords.push({
-        scores: {
-          neural: scores,
-          frequency: frequencyScores,
-          heuristic: heuristicScores,
-          random: buildSeededRandomScores(outputNumbers.length, sample.targetDrawNumber),
-        },
-        targetNumbers: sample.targetNumbers,
-      });
-      inputTensor.dispose();
-      prediction.dispose();
-    }
-
-    let ensembleWeights = collapseDuplicateExpertWeights(
-      learningRecords.map((record) => record.scores),
-      DEFAULT_ENSEMBLE_WEIGHTS,
-    );
-
-    // Learn weights only after equivalent experts have been collapsed.
-    // Random remains a zero-weight evaluation control.
-    for (const record of learningRecords) {
-      const rewards: Record<EnsembleMethod, number> = {
-        neural: calculateCalibrationReward(record.scores.neural, outputNumbers, record.targetNumbers),
-        frequency: calculateCalibrationReward(record.scores.frequency, outputNumbers, record.targetNumbers),
-        heuristic: calculateCalibrationReward(record.scores.heuristic, outputNumbers, record.targetNumbers),
-        random: 0,
-      };
-      ensembleWeights = updateEnsembleWeights(ensembleWeights, rewards);
-    }
-
-    let gateNeuralMatches = 0;
-    let gateEnsembleMatches = 0;
-    for (const sample of reliabilityGateSamples) {
-      const inputTensor = tf.tensor2d([sample.input], [1, inputSize]);
-      const prediction = model.predict(inputTensor) as tf.Tensor;
-      const neuralScores = Array.from(await prediction.data());
-      const componentScores: EnsembleScores = {
-        neural: neuralScores,
-        frequency: buildRecentFrequencyScores(sample.inputWindow, outputNumbers),
-        heuristic: buildHeuristicScores(sample.inputWindow, outputNumbers),
-        random: buildSeededRandomScores(outputNumbers.length, sample.targetDrawNumber),
-      };
-      const neuralNumbers = pickTopKNumbers(
-        neuralScores,
-        outputNumbers,
-        sample.targetNumbers.length,
-      );
-      const ensembleNumbers = pickTopKNumbers(
-        blendEnsembleScores(componentScores, ensembleWeights),
-        outputNumbers,
-        sample.targetNumbers.length,
-      );
-      gateNeuralMatches += countMatches(neuralNumbers, sample.targetNumbers);
-      gateEnsembleMatches += countMatches(ensembleNumbers, sample.targetNumbers);
-      inputTensor.dispose();
-      prediction.dispose();
-    }
-
-    const neuralGateAverage = gateNeuralMatches / reliabilityGateSamples.length;
-    const ensembleGateAverage = gateEnsembleMatches / reliabilityGateSamples.length;
-    const selectedMethod = ensembleGateAverage > neuralGateAverage ? "ensemble" : "neural";
-    if (selectedMethod === "neural") {
-      ensembleWeights = { neural: 1, frequency: 0, heuristic: 0, random: 0 };
-    }
-    const ensembleReliability = {
-      selectedMethod,
-      neuralAverageMatches: neuralGateAverage,
-      ensembleAverageMatches: ensembleGateAverage,
-      gateSampleCount: reliabilityGateSamples.length,
-    } as const;
+    const calibration = await calibrateEnsemble({
+      model, samples: calibrationSamples, outputNumbers, inputSize,
+      confidenceLevel: config.reliabilityConfidenceLevel,
+      minimumAdvantage: config.reliabilityMinimumAdvantage,
+      minimumGroups: config.reliabilityMinimumGroups,
+      bootstrapIterations: config.reliabilityBootstrapIterations,
+      seed: config.trainingSeed + 7000,
+    });
+    const ensembleWeights = calibration.weights;
+    const ensembleReliability = calibration.diagnostics;
 
     const methodTotals = { neural: 0, frequency: 0, random: 0, heuristic: 0, ensemble: 0 };
 
@@ -522,6 +545,16 @@ async function runTrainingJob(runId: number): Promise<void> {
       prediction.dispose();
     }
 
+    if (config.enableRollingBacktest) {
+      await runRollingBacktests({
+        runId,
+        config,
+        samples: [...trainingSamples, ...holdoutSamples],
+        outputNumbers,
+        baseProcessed: config.epochs * baseTrainingSamples.length,
+      });
+    }
+
     const averageMatches = totalMatches / holdoutSamples.length;
 
     const serializedWeights = model.weights.map((weight) => {
@@ -543,7 +576,7 @@ async function runTrainingJob(runId: number): Promise<void> {
       outputNumbers,
       weights: serializedWeights,
       ensembleWeights,
-      ensembleVersion: "deduplicated-reliability-gate-v3",
+      ensembleVersion: "confidence-aware-reliability-gate-v4",
       ensembleReliability,
       inputEncoding: "windowed_multi_hot_v1",
       lossVersion: "weighted_bce_v1",

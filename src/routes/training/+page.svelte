@@ -26,11 +26,31 @@
   const nextPredictionMethods = $derived.by(() =>
     nextDrawPrediction
       ? [
-          { label: "Ensemble", numbers: nextDrawPrediction.predictedNumbers, weight: null },
-          { label: "Neural", numbers: nextDrawPrediction.neuralPredictedNumbers, weight: nextDrawPrediction.ensembleWeights.neural },
-          { label: "Frequency", numbers: nextDrawPrediction.frequencyPredictedNumbers, weight: nextDrawPrediction.ensembleWeights.frequency },
-          { label: "Heuristic", numbers: nextDrawPrediction.heuristicPredictedNumbers, weight: nextDrawPrediction.ensembleWeights.heuristic },
-          { label: "Random control", numbers: nextDrawPrediction.randomPredictedNumbers, weight: nextDrawPrediction.ensembleWeights.random },
+          {
+            label: "Ensemble",
+            numbers: nextDrawPrediction.predictedNumbers,
+            weight: null,
+          },
+          {
+            label: "Neural",
+            numbers: nextDrawPrediction.neuralPredictedNumbers,
+            weight: nextDrawPrediction.ensembleWeights.neural,
+          },
+          {
+            label: "Frequency",
+            numbers: nextDrawPrediction.frequencyPredictedNumbers,
+            weight: nextDrawPrediction.ensembleWeights.frequency,
+          },
+          {
+            label: "Heuristic",
+            numbers: nextDrawPrediction.heuristicPredictedNumbers,
+            weight: nextDrawPrediction.ensembleWeights.heuristic,
+          },
+          {
+            label: "Random control",
+            numbers: nextDrawPrediction.randomPredictedNumbers,
+            weight: nextDrawPrediction.ensembleWeights.random,
+          },
         ]
       : [],
   );
@@ -86,6 +106,22 @@
       ),
     };
   });
+  const rollingSummary = $derived.by(() => {
+    const folds = holdoutRunDetail?.backtestFolds ?? [];
+    if (!folds.length) return null;
+    const mean = (values: number[]) =>
+      values.reduce((sum, value) => sum + value, 0) / values.length;
+    const gated = folds.map((fold) => fold.gatedScore);
+    return {
+      meanGated: mean(gated),
+      meanNeural: mean(folds.map((fold) => fold.neuralScore)),
+      meanRandom: mean(folds.map((fold) => fold.randomScore)),
+      worstGated: Math.min(...gated),
+      foldsBeatingRandom: folds.filter(
+        (fold) => fold.gatedScore > fold.randomScore,
+      ).length,
+    };
+  });
 
   let selectedPreset = $state("medium");
   let customHiddenLayersText = $state("");
@@ -99,6 +135,14 @@
   let earlyStoppingPatienceInput = $state("");
   let earlyStoppingMinDeltaInput = $state("");
   let trainingSeedInput = $state("");
+  let enableRollingBacktestInput = $state(false);
+  let rollingFoldsInput = $state("");
+  let rollingHoldoutWeeksInput = $state("");
+  let minimumTrainingWeeksInput = $state("");
+  let reliabilityConfidenceLevelInput = $state("");
+  let reliabilityMinimumAdvantageInput = $state("");
+  let reliabilityMinimumGroupsInput = $state("");
+  let reliabilityBootstrapIterationsInput = $state("");
   let policyModeInput = $state("");
   let predictionRunInput = $state("");
   let appliedFormRunId = $state<number | null>(null);
@@ -140,6 +184,20 @@
       earlyStoppingPatienceInput = String(config.earlyStoppingPatience);
       earlyStoppingMinDeltaInput = String(config.earlyStoppingMinDelta);
       trainingSeedInput = String(config.trainingSeed);
+      enableRollingBacktestInput = config.enableRollingBacktest;
+      rollingFoldsInput = String(config.rollingFolds);
+      rollingHoldoutWeeksInput = String(config.rollingHoldoutWeeks);
+      minimumTrainingWeeksInput = String(config.minimumTrainingWeeks);
+      reliabilityConfidenceLevelInput = String(
+        config.reliabilityConfidenceLevel,
+      );
+      reliabilityMinimumAdvantageInput = String(
+        config.reliabilityMinimumAdvantage,
+      );
+      reliabilityMinimumGroupsInput = String(config.reliabilityMinimumGroups);
+      reliabilityBootstrapIterationsInput = String(
+        config.reliabilityBootstrapIterations,
+      );
       appliedFormRunId = config.runId;
       defaultsApplied = true;
     } else if (!config && !defaultsApplied) {
@@ -153,6 +211,20 @@
       earlyStoppingPatienceInput = String(defaults.earlyStoppingPatience);
       earlyStoppingMinDeltaInput = String(defaults.earlyStoppingMinDelta);
       trainingSeedInput = String(defaults.trainingSeed);
+      enableRollingBacktestInput = defaults.enableRollingBacktest;
+      rollingFoldsInput = String(defaults.rollingFolds);
+      rollingHoldoutWeeksInput = String(defaults.rollingHoldoutWeeks);
+      minimumTrainingWeeksInput = String(defaults.minimumTrainingWeeks);
+      reliabilityConfidenceLevelInput = String(
+        defaults.reliabilityConfidenceLevel,
+      );
+      reliabilityMinimumAdvantageInput = String(
+        defaults.reliabilityMinimumAdvantage,
+      );
+      reliabilityMinimumGroupsInput = String(defaults.reliabilityMinimumGroups);
+      reliabilityBootstrapIterationsInput = String(
+        defaults.reliabilityBootstrapIterations,
+      );
       defaultsApplied = true;
     }
   });
@@ -301,19 +373,19 @@
     <div class="flex gap-2">
       <a
         href="/"
-        class="inline-flex items-center rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
+        class="inline-flex cursor-pointer items-center rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 transition-[transform,colors] duration-100 hover:bg-zinc-50 active:translate-y-px active:scale-[0.98] active:bg-zinc-100"
       >
         Back to Home
       </a>
       <a
         href="/database"
-        class="inline-flex items-center rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
+        class="inline-flex cursor-pointer items-center rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 transition-[transform,colors] duration-100 hover:bg-zinc-50 active:translate-y-px active:scale-[0.98] active:bg-zinc-100"
       >
         View Database
       </a>
       <a
         href="/training/policy-report"
-        class="inline-flex items-center rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
+        class="inline-flex cursor-pointer items-center rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 transition-[transform,colors] duration-100 hover:bg-zinc-50 active:translate-y-px active:scale-[0.98] active:bg-zinc-100"
       >
         Policy Report
       </a>
@@ -329,14 +401,26 @@
         {datasetStats.drawCount}
       </p>
     </Card>
-    <Card class={datasetStats.conflictingDrawIdentities > 0 ? "border-red-300" : "border-emerald-300"}>
+    <Card
+      class={datasetStats.conflictingDrawIdentities > 0
+        ? "border-red-300"
+        : "border-emerald-300"}
+    >
       <p class="text-xs font-semibold uppercase tracking-wider text-zinc-500">
         Data Integrity
       </p>
-      <p class:text-red-700={datasetStats.conflictingDrawIdentities > 0} class:text-emerald-700={datasetStats.conflictingDrawIdentities === 0} class="mt-2 text-3xl font-semibold">
-        {datasetStats.conflictingDrawIdentities === 0 ? "Clean" : `${datasetStats.conflictingDrawIdentities} conflicts`}
+      <p
+        class:text-red-700={datasetStats.conflictingDrawIdentities > 0}
+        class:text-emerald-700={datasetStats.conflictingDrawIdentities === 0}
+        class="mt-2 text-3xl font-semibold"
+      >
+        {datasetStats.conflictingDrawIdentities === 0
+          ? "Clean"
+          : `${datasetStats.conflictingDrawIdentities} conflicts`}
       </p>
-      <p class="mt-1 text-xs text-zinc-500">Random expectation: {datasetStats.randomExpectedMatches.toFixed(2)} matches</p>
+      <p class="mt-1 text-xs text-zinc-500">
+        Random expectation: {datasetStats.randomExpectedMatches.toFixed(2)} matches
+      </p>
     </Card>
     <Card>
       <p class="text-xs font-semibold uppercase tracking-wider text-zinc-500">
@@ -400,11 +484,37 @@
           {/if}
           {#if nextDrawPrediction.ensembleReliability}
             <p class="mt-1 text-xs font-semibold text-emerald-800">
-              Reliability gate selected {nextDrawPrediction.ensembleReliability.selectedMethod === "neural" ? "Neural only" : "the calibrated ensemble"}
-              ({nextDrawPrediction.ensembleReliability.gateSampleCount} calibration samples;
-              Neural {nextDrawPrediction.ensembleReliability.neuralAverageMatches.toFixed(2)},
-              Ensemble {nextDrawPrediction.ensembleReliability.ensembleAverageMatches.toFixed(2)}).
+              Reliability gate selected {nextDrawPrediction.ensembleReliability
+                .selectedMethod === "neural"
+                ? "Neural only"
+                : "the calibrated ensemble"}
+              ({nextDrawPrediction.ensembleReliability.gateSampleCount} calibration
+              samples; Neural {nextDrawPrediction.ensembleReliability.neuralAverageMatches.toFixed(
+                2,
+              )}, Ensemble {nextDrawPrediction.ensembleReliability.ensembleAverageMatches.toFixed(
+                2,
+              )}).
             </p>
+            {#if nextDrawPrediction.ensembleReliability.reason}
+              <p class="mt-0.5 text-xs text-emerald-700">
+                Paired advantage {nextDrawPrediction.ensembleReliability.pairedAdvantage.toFixed(
+                  3,
+                )},
+                {(
+                  nextDrawPrediction.ensembleReliability.confidenceLevel * 100
+                ).toFixed(0)}% CI
+                {nextDrawPrediction.ensembleReliability.confidenceLow.toFixed(
+                  3,
+                )} to {nextDrawPrediction.ensembleReliability.confidenceHigh.toFixed(
+                  3,
+                )};
+                {nextDrawPrediction.ensembleReliability.independentGroupCount} independent
+                draw groups. Decision: {nextDrawPrediction.ensembleReliability.reason.replaceAll(
+                  "_",
+                  " ",
+                )}.
+              </p>
+            {/if}
           {/if}
         {:else}
           <p class="mt-1 text-sm text-zinc-700">
@@ -418,15 +528,26 @@
     {#if nextDrawPrediction}
       <div class="mt-4 flex flex-wrap items-center gap-4 text-xs text-zinc-600">
         <span class="font-semibold text-zinc-700">Agreement key:</span>
-        <span class="inline-flex items-center gap-1.5"><span class="h-4 w-4 rounded-full bg-zinc-700"></span>1 method</span>
-        <span class="inline-flex items-center gap-1.5"><span class="h-4 w-4 rounded-full bg-cyan-700"></span>2 methods</span>
-        <span class="inline-flex items-center gap-1.5"><span class="h-4 w-4 rounded-full bg-emerald-700"></span>3+ methods</span>
+        <span class="inline-flex items-center gap-1.5"
+          ><span class="h-4 w-4 rounded-full bg-zinc-700"></span>1 method</span
+        >
+        <span class="inline-flex items-center gap-1.5"
+          ><span class="h-4 w-4 rounded-full bg-cyan-700"></span>2 methods</span
+        >
+        <span class="inline-flex items-center gap-1.5"
+          ><span class="h-4 w-4 rounded-full bg-emerald-700"></span>3+ methods</span
+        >
       </div>
       <div class="mt-4 grid gap-3 lg:grid-cols-2 xl:grid-cols-3">
         {#each nextPredictionMethods as prediction}
-          <div class:border-emerald-400={prediction.label === "Ensemble"} class="rounded-md border border-emerald-200 bg-white/80 p-3">
+          <div
+            class:border-emerald-400={prediction.label === "Ensemble"}
+            class="rounded-md border border-emerald-200 bg-white/80 p-3"
+          >
             <div class="flex items-center justify-between gap-2">
-              <p class="text-xs font-semibold uppercase tracking-wide text-emerald-800">
+              <p
+                class="text-xs font-semibold uppercase tracking-wide text-emerald-800"
+              >
                 {prediction.label}
               </p>
               {#if prediction.weight !== null}
@@ -438,12 +559,18 @@
             <div class="mt-2 flex flex-wrap gap-2">
               {#each prediction.numbers as n}
                 <span
-                  class:bg-zinc-700={(nextPredictionAgreement.get(n)?.length ?? 0) === 1}
-                  class:bg-cyan-700={(nextPredictionAgreement.get(n)?.length ?? 0) === 2}
-                  class:bg-emerald-700={(nextPredictionAgreement.get(n)?.length ?? 0) >= 3}
+                  class:bg-zinc-700={(nextPredictionAgreement.get(n)?.length ??
+                    0) === 1}
+                  class:bg-cyan-700={(nextPredictionAgreement.get(n)?.length ??
+                    0) === 2}
+                  class:bg-emerald-700={(nextPredictionAgreement.get(n)
+                    ?.length ?? 0) >= 3}
                   class="relative inline-flex h-9 min-w-9 items-center justify-center rounded-full px-2 text-sm font-semibold text-white ring-2 ring-white"
                   title={`Selected by ${nextPredictionAgreement.get(n)?.join(", ") ?? prediction.label}`}
-                  >{n}{#if (nextPredictionAgreement.get(n)?.length ?? 0) > 1}<span class="absolute -right-1.5 -top-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-white px-1 text-[10px] font-bold text-zinc-800 shadow">{nextPredictionAgreement.get(n)?.length}</span>{/if}</span
+                  >{n}{#if (nextPredictionAgreement.get(n)?.length ?? 0) > 1}<span
+                      class="absolute -right-1.5 -top-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-white px-1 text-[10px] font-bold text-zinc-800 shadow"
+                      >{nextPredictionAgreement.get(n)?.length}</span
+                    >{/if}</span
                 >
               {/each}
             </div>
@@ -453,14 +580,25 @@
 
       {#if sharedNextPredictionNumbers.length > 0}
         <div class="mt-3 rounded-md border border-emerald-200 bg-white/80 p-3">
-          <p class="text-xs font-semibold uppercase tracking-wide text-emerald-800">
+          <p
+            class="text-xs font-semibold uppercase tracking-wide text-emerald-800"
+          >
             Shared numbers across methods
           </p>
           <div class="mt-2 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
             {#each sharedNextPredictionNumbers as [number, methods]}
-              <div class="flex items-center gap-2 rounded-md bg-emerald-50 px-2 py-1.5">
-                <span class:bg-cyan-700={methods.length === 2} class:bg-emerald-700={methods.length >= 3} class="inline-flex h-8 min-w-8 items-center justify-center rounded-full px-2 text-sm font-bold text-white">{number}</span>
-                <span class="text-xs leading-4 text-zinc-700">{methods.join(" · ")}</span>
+              <div
+                class="flex items-center gap-2 rounded-md bg-emerald-50 px-2 py-1.5"
+              >
+                <span
+                  class:bg-cyan-700={methods.length === 2}
+                  class:bg-emerald-700={methods.length >= 3}
+                  class="inline-flex h-8 min-w-8 items-center justify-center rounded-full px-2 text-sm font-bold text-white"
+                  >{number}</span
+                >
+                <span class="text-xs leading-4 text-zinc-700"
+                  >{methods.join(" · ")}</span
+                >
               </div>
             {/each}
           </div>
@@ -477,15 +615,31 @@
         Return here to get the next prediction from the same unchanged weights.
       </p>
 
-      <div class="mt-3 rounded-md border border-emerald-100 bg-emerald-50/70 p-3 text-sm text-zinc-700">
-        <p class="font-semibold text-emerald-900">How to select a specific run</p>
+      <div
+        class="mt-3 rounded-md border border-emerald-100 bg-emerald-50/70 p-3 text-sm text-zinc-700"
+      >
+        <p class="font-semibold text-emerald-900">
+          How to select a specific run
+        </p>
         <ol class="mt-1 list-decimal space-y-1 pl-5">
-          <li>Open the completed-run list below and choose the run number you want.</li>
-          <li>Click <span class="font-semibold text-zinc-900">Pin Run</span>.</li>
-          <li>Confirm that the prediction heading says it is based on that run and that the fixed-weights message shows the same pinned run number.</li>
+          <li>
+            Open the completed-run list below and choose the run number you
+            want.
+          </li>
+          <li>
+            Click <span class="font-semibold text-zinc-900">Pin Run</span>.
+          </li>
+          <li>
+            Confirm that the prediction heading says it is based on that run and
+            that the fixed-weights message shows the same pinned run number.
+          </li>
         </ol>
         <p class="mt-2 text-xs text-zinc-600">
-          The pinned run remains selected after page refreshes and draw-data imports. Its saved model and ensemble weights generate every next-draw ticket until you select another run. Choose <span class="font-semibold text-zinc-800">Use Auto</span> to clear the pin and return to automatic run selection.
+          The pinned run remains selected after page refreshes and draw-data
+          imports. Its saved model and ensemble weights generate every next-draw
+          ticket until you select another run. Choose <span
+            class="font-semibold text-zinc-800">Use Auto</span
+          > to clear the pin and return to automatic run selection.
         </p>
       </div>
 
@@ -504,7 +658,8 @@
             <option value="">Select completed run...</option>
             {#each predictionRunCandidates as run}
               <option value={String(run.id)}>
-                #{run.id} | holdout {run.holdoutScore ?? "n/a"} | win {run.windowSize}
+                {run.isFavorite ? "★ " : ""}#{run.id} | holdout {run.holdoutScore ??
+                  "n/a"} | win {run.windowSize}
                 | layers [{run.hiddenLayers.join(", ")}]
               </option>
             {/each}
@@ -538,12 +693,15 @@
     </div>
 
     {#if latestRunFormConfig}
-      <div class="mb-4 rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
+      <div
+        class="mb-4 rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-900"
+      >
         <p class="font-semibold">
           Showing the exact values used by run #{latestRunFormConfig.runId}.
         </p>
         <p class="mt-1 text-xs text-emerald-800">
-          Run status: {latestRunFormConfig.status}. These recorded values remain visible after the run ends and can be edited to create the next run.
+          Run status: {latestRunFormConfig.status}. These recorded values remain
+          visible after the run ends and can be edited to create the next run.
         </p>
       </div>
     {/if}
@@ -590,7 +748,11 @@
       </p>
     </div>
 
-    <form method="POST" action="?/createRun" use:enhance={preserveCreateRunValues}>
+    <form
+      method="POST"
+      action="?/createRun"
+      use:enhance={preserveCreateRunValues}
+    >
       <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <label class="space-y-1 text-sm font-medium text-zinc-700">
           Preset
@@ -735,7 +897,9 @@
             class="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-900 shadow-sm focus:border-zinc-500 focus:outline-none"
           />
           <p class="text-xs font-normal text-zinc-500">
-            Try 3.0 for the next run. The class-balance default is {defaults.positiveClassWeight.toFixed(2)}.
+            Try 3.0 for the next run. The class-balance default is {defaults.positiveClassWeight.toFixed(
+              2,
+            )}.
           </p>
         </label>
 
@@ -786,6 +950,96 @@
             Reproduces initialization and dropout randomness. Start with 42.
           </p>
         </label>
+      </div>
+
+      <div class="mt-5 rounded-md border border-sky-200 bg-sky-50/60 p-4">
+        <label
+          class="flex items-center gap-2 text-sm font-semibold text-zinc-800"
+        >
+          <input
+            type="checkbox"
+            name="enableRollingBacktest"
+            bind:checked={enableRollingBacktestInput}
+            class="h-4 w-4"
+          />
+          Enable rolling chronological backtest
+        </label>
+        <p class="mt-1 text-xs text-zinc-600">
+          Retrains independent expanding-window folds. This provides stronger
+          evidence but increases runtime.
+        </p>
+        <div class="mt-3 grid gap-3 md:grid-cols-2 lg:grid-cols-4">
+          <label class="space-y-1 text-xs font-medium text-zinc-700"
+            >Folds<input
+              type="number"
+              name="rollingFolds"
+              min="1"
+              max="10"
+              bind:value={rollingFoldsInput}
+              class="h-9 w-full rounded-md border border-zinc-300 bg-white px-2"
+            /></label
+          >
+          <label class="space-y-1 text-xs font-medium text-zinc-700"
+            >Holdout weeks per fold<input
+              type="number"
+              name="rollingHoldoutWeeks"
+              min="1"
+              bind:value={rollingHoldoutWeeksInput}
+              class="h-9 w-full rounded-md border border-zinc-300 bg-white px-2"
+            /></label
+          >
+          <label class="space-y-1 text-xs font-medium text-zinc-700"
+            >Minimum training weeks<input
+              type="number"
+              name="minimumTrainingWeeks"
+              min="1"
+              bind:value={minimumTrainingWeeksInput}
+              class="h-9 w-full rounded-md border border-zinc-300 bg-white px-2"
+            /></label
+          >
+          <label class="space-y-1 text-xs font-medium text-zinc-700"
+            >Bootstrap iterations<input
+              type="number"
+              name="reliabilityBootstrapIterations"
+              min="100"
+              max="10000"
+              step="100"
+              bind:value={reliabilityBootstrapIterationsInput}
+              class="h-9 w-full rounded-md border border-zinc-300 bg-white px-2"
+            /></label
+          >
+          <label class="space-y-1 text-xs font-medium text-zinc-700"
+            >Confidence level<input
+              type="number"
+              name="reliabilityConfidenceLevel"
+              min="0.5"
+              max="0.999"
+              step="0.01"
+              bind:value={reliabilityConfidenceLevelInput}
+              class="h-9 w-full rounded-md border border-zinc-300 bg-white px-2"
+            /></label
+          >
+          <label class="space-y-1 text-xs font-medium text-zinc-700"
+            >Minimum ensemble advantage<input
+              type="number"
+              name="reliabilityMinimumAdvantage"
+              min="0"
+              max="2"
+              step="0.01"
+              bind:value={reliabilityMinimumAdvantageInput}
+              class="h-9 w-full rounded-md border border-zinc-300 bg-white px-2"
+            /></label
+          >
+          <label class="space-y-1 text-xs font-medium text-zinc-700"
+            >Minimum independent groups<input
+              type="number"
+              name="reliabilityMinimumGroups"
+              min="2"
+              bind:value={reliabilityMinimumGroupsInput}
+              class="h-9 w-full rounded-md border border-zinc-300 bg-white px-2"
+            /></label
+          >
+        </div>
       </div>
 
       <div class="mt-4 flex flex-wrap items-center gap-2">
@@ -916,6 +1170,14 @@
           <p class="text-lg font-semibold text-zinc-900">
             {activeProgress.status}
           </p>
+          <p class="text-xs text-zinc-500">
+            {activeProgress.currentPhase.replaceAll(
+              "_",
+              " ",
+            )}{activeProgress.currentFold > 0
+              ? ` · fold ${activeProgress.currentFold}/${activeProgress.totalFolds}`
+              : ""}
+          </p>
         </div>
         <div class="rounded-md border border-zinc-200 bg-white p-3">
           <p class="text-xs uppercase tracking-wide text-zinc-500">Epoch</p>
@@ -976,6 +1238,19 @@
 
   <Card>
     <h2 class="text-xl font-semibold text-zinc-900">Recent Runs</h2>
+    <p class="mt-1 text-sm text-zinc-600">
+      Mark important runs as favourites. Favourite model artifacts are protected
+      from automatic cleanup.
+    </p>
+    {#if form?.favoriteMessage}
+      <p
+        class:!text-emerald-700={form?.success}
+        class:!text-rose-700={!form?.success}
+        class="mt-2 text-sm text-zinc-700"
+      >
+        {form.favoriteMessage}
+      </p>
+    {/if}
 
     {#if latestRuns.length === 0}
       <p class="mt-2 text-sm text-zinc-600">No runs yet.</p>
@@ -985,6 +1260,7 @@
           <thead>
             <tr class="border-b border-zinc-200 text-left text-zinc-600">
               <th class="px-3 py-2 font-semibold">ID</th>
+              <th class="px-3 py-2 font-semibold">Favourite</th>
               <th class="px-3 py-2 font-semibold">Status</th>
               <th class="px-3 py-2 font-semibold">Epoch</th>
               <th class="px-3 py-2 font-semibold">Window</th>
@@ -996,10 +1272,36 @@
           </thead>
           <tbody>
             {#each latestRuns as run}
-              <tr class="border-b border-zinc-100 text-zinc-800">
+              <tr
+                class:bg-amber-50={run.isFavorite}
+                class="border-b border-zinc-100 text-zinc-800"
+              >
                 <td class="px-3 py-2">{run.id}</td>
+                <td class="px-3 py-2">
+                  <form method="POST" action="?/setRunFavorite" use:enhance>
+                    <input type="hidden" name="runId" value={run.id} />
+                    <input
+                      type="hidden"
+                      name="isFavorite"
+                      value={run.isFavorite ? "false" : "true"}
+                    />
+                    <button
+                      type="submit"
+                      class:!border-amber-400={run.isFavorite}
+                      class:!bg-amber-100={run.isFavorite}
+                      class="inline-flex min-w-24 cursor-pointer items-center justify-center gap-1 rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs font-semibold text-zinc-700 transition-[transform,colors] duration-100 hover:bg-zinc-50 active:translate-y-px active:scale-[0.98] active:bg-zinc-100"
+                      aria-label={run.isFavorite
+                        ? `Remove run ${run.id} from favourites`
+                        : `Add run ${run.id} to favourites`}
+                    >
+                      <span class:text-amber-600={run.isFavorite}
+                        >{run.isFavorite ? "★" : "☆"}</span
+                      >
+                      {run.isFavorite ? "Unfavourite" : "Favourite"}
+                    </button>
+                  </form>
+                </td>
                 <td class="px-3 py-2">{run.status}</td>
-                <td class="px-3 py-2">{run.currentEpoch}/{run.totalEpochs}</td>
                 <td class="px-3 py-2">{run.windowSize}</td>
                 <td class="px-3 py-2">{run.roundsRemaining}</td>
                 <td class="px-3 py-2">[{run.hiddenLayers.join(", ")}]</td>
@@ -1039,6 +1341,8 @@
               <th class="px-3 py-2 font-semibold">Ensemble</th>
               <th class="px-3 py-2 font-semibold">Model - Heuristic</th>
               <th class="px-3 py-2 font-semibold">Winner</th>
+              <th class="px-3 py-2 font-semibold">Rolling Mean</th>
+              <th class="px-3 py-2 font-semibold">Rolling Worst</th>
             </tr>
           </thead>
           <tbody>
@@ -1067,6 +1371,15 @@
                   {summary.modelVsHeuristic?.toFixed(2) ?? "n/a"}
                 </td>
                 <td class="px-3 py-2">{summary.winner ?? "n/a"}</td>
+                <td class="px-3 py-2"
+                  >{summary.rollingMean?.toFixed(2) ??
+                    "n/a"}{summary.rollingFolds
+                    ? ` (${summary.rollingFolds})`
+                    : ""}</td
+                >
+                <td class="px-3 py-2"
+                  >{summary.rollingWorst?.toFixed(2) ?? "n/a"}</td
+                >
               </tr>
             {/each}
           </tbody>
@@ -1075,10 +1388,64 @@
     {/if}
   </Card>
 
+  {#if holdoutRunDetail?.backtestFolds?.length}
+    <Card>
+      <h2 class="text-xl font-semibold text-zinc-900">
+        Rolling Backtest (Run #{holdoutResultsRunId})
+      </h2>
+      {#if rollingSummary}
+        <p class="mt-2 text-sm text-zinc-700">
+          Mean gated {rollingSummary.meanGated.toFixed(2)}, Neural {rollingSummary.meanNeural.toFixed(
+            2,
+          )}, Random {rollingSummary.meanRandom.toFixed(2)}; worst fold {rollingSummary.worstGated.toFixed(
+            2,
+          )}; beat random in {rollingSummary.foldsBeatingRandom}/{holdoutRunDetail
+            .backtestFolds.length} folds.
+        </p>
+      {/if}
+      <div class="mt-4 overflow-x-auto">
+        <table class="w-full min-w-[900px] border-collapse text-sm">
+          <thead
+            ><tr class="border-b border-zinc-200 text-left text-zinc-600">
+              <th class="px-3 py-2">Fold</th><th class="px-3 py-2"
+                >Holdout dates</th
+              ><th class="px-3 py-2">Samples</th>
+              <th class="px-3 py-2">Neural</th><th class="px-3 py-2"
+                >Raw ensemble</th
+              ><th class="px-3 py-2">Gated</th>
+              <th class="px-3 py-2">Random</th><th class="px-3 py-2">Gate</th>
+            </tr></thead
+          >
+          <tbody
+            >{#each holdoutRunDetail.backtestFolds as fold}
+              <tr class="border-b border-zinc-100">
+                <td class="px-3 py-2">{fold.fold}</td><td class="px-3 py-2"
+                  >{fold.holdoutStartDate}–{fold.holdoutEndDate}</td
+                >
+                <td class="px-3 py-2">{fold.holdoutSamples}</td><td
+                  class="px-3 py-2">{fold.neuralScore.toFixed(2)}</td
+                >
+                <td class="px-3 py-2">{fold.ensembleScore.toFixed(2)}</td><td
+                  class="px-3 py-2 font-semibold"
+                  >{fold.gatedScore.toFixed(2)}</td
+                >
+                <td class="px-3 py-2">{fold.randomScore.toFixed(2)}</td><td
+                  class="px-3 py-2">{fold.selectedMethod}</td
+                >
+              </tr>
+            {/each}</tbody
+          >
+        </table>
+      </div>
+    </Card>
+  {/if}
+
   <div>
     <Card>
       <h2 class="text-xl font-semibold text-zinc-900">
-        Holdout Results {holdoutResultsRunId ? `(Run #${holdoutResultsRunId})` : ""}
+        Holdout Results {holdoutResultsRunId
+          ? `(Run #${holdoutResultsRunId})`
+          : ""}
       </h2>
       {#if pinnedPredictionRunId && holdoutResultsRunId === pinnedPredictionRunId}
         <p class="mt-1 text-xs font-semibold text-emerald-700">
@@ -1111,7 +1478,9 @@
                 {(summary.threePlusMatchRate * 100).toFixed(0)}%
               </p>
               <p class="mt-1 text-xs text-zinc-500">
-                95% CI {summary.confidenceLow95.toFixed(2)}–{summary.confidenceHigh95.toFixed(2)}
+                95% CI {summary.confidenceLow95.toFixed(
+                  2,
+                )}–{summary.confidenceHigh95.toFixed(2)}
               </p>
             </div>
           {/each}
@@ -1119,14 +1488,22 @@
       {/if}
 
       {#if holdoutRunDetail && holdoutRunDetail.testResults.length > 0}
-        <div class="mt-4 flex flex-wrap items-center gap-4 text-xs text-zinc-600">
+        <div
+          class="mt-4 flex flex-wrap items-center gap-4 text-xs text-zinc-600"
+        >
           <span class="font-semibold text-zinc-700">Number key:</span>
           <span class="inline-flex items-center gap-1.5">
-            <span class="inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-emerald-600 px-1.5 font-semibold text-white">✓</span>
+            <span
+              class="inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-emerald-600 px-1.5 font-semibold text-white"
+              >✓</span
+            >
             Matches actual
           </span>
           <span class="inline-flex items-center gap-1.5">
-            <span class="inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-zinc-200 px-1.5 font-semibold text-zinc-700">–</span>
+            <span
+              class="inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-zinc-200 px-1.5 font-semibold text-zinc-700"
+              >–</span
+            >
             No match
           </span>
         </div>
@@ -1164,27 +1541,69 @@
                   <td class="px-3 py-2">
                     <div class="flex min-w-48 flex-wrap gap-1">
                       {#each result.predictedNumbers as number}
-                        <span class:bg-emerald-600={result.actualNumbers.includes(number)} class:text-white={result.actualNumbers.includes(number)} class:bg-zinc-200={!result.actualNumbers.includes(number)} class:text-zinc-700={!result.actualNumbers.includes(number)} class="inline-flex h-7 min-w-7 items-center justify-center rounded-full px-1.5 text-xs font-semibold">{number}</span>
+                        <span
+                          class:bg-emerald-600={result.actualNumbers.includes(
+                            number,
+                          )}
+                          class:text-white={result.actualNumbers.includes(
+                            number,
+                          )}
+                          class:bg-zinc-200={!result.actualNumbers.includes(
+                            number,
+                          )}
+                          class:text-zinc-700={!result.actualNumbers.includes(
+                            number,
+                          )}
+                          class="inline-flex h-7 min-w-7 items-center justify-center rounded-full px-1.5 text-xs font-semibold"
+                          >{number}</span
+                        >
                       {/each}
                     </div>
                   </td>
                   <td class="px-3 py-2">
                     <div class="flex min-w-48 flex-wrap gap-1">
                       {#each result.actualNumbers as number}
-                        <span class="inline-flex h-7 min-w-7 items-center justify-center rounded-full bg-sky-700 px-1.5 text-xs font-semibold text-white">{number}</span>
+                        <span
+                          class="inline-flex h-7 min-w-7 items-center justify-center rounded-full bg-sky-700 px-1.5 text-xs font-semibold text-white"
+                          >{number}</span
+                        >
                       {/each}
                     </div>
                   </td>
                   <td class="px-3 py-2">
-                    <span class:bg-emerald-100={result.matchCount > 0} class:text-emerald-800={result.matchCount > 0} class:bg-zinc-100={result.matchCount === 0} class:text-zinc-600={result.matchCount === 0} class="inline-flex min-w-8 justify-center rounded-full px-2 py-1 font-bold">{result.matchCount}</span>
+                    <span
+                      class:bg-emerald-100={result.matchCount > 0}
+                      class:text-emerald-800={result.matchCount > 0}
+                      class:bg-zinc-100={result.matchCount === 0}
+                      class:text-zinc-600={result.matchCount === 0}
+                      class="inline-flex min-w-8 justify-center rounded-full px-2 py-1 font-bold"
+                      >{result.matchCount}</span
+                    >
                   </td>
                   <td class="px-3 py-2">
                     {#if result.frequencyPredictedNumbers}
                       <div class="flex min-w-48 flex-wrap gap-1">
                         {#each result.frequencyPredictedNumbers as number}
-                          <span class:bg-emerald-600={result.actualNumbers.includes(number)} class:text-white={result.actualNumbers.includes(number)} class:bg-zinc-200={!result.actualNumbers.includes(number)} class:text-zinc-700={!result.actualNumbers.includes(number)} class="inline-flex h-7 min-w-7 items-center justify-center rounded-full px-1.5 text-xs font-semibold">{number}</span>
+                          <span
+                            class:bg-emerald-600={result.actualNumbers.includes(
+                              number,
+                            )}
+                            class:text-white={result.actualNumbers.includes(
+                              number,
+                            )}
+                            class:bg-zinc-200={!result.actualNumbers.includes(
+                              number,
+                            )}
+                            class:text-zinc-700={!result.actualNumbers.includes(
+                              number,
+                            )}
+                            class="inline-flex h-7 min-w-7 items-center justify-center rounded-full px-1.5 text-xs font-semibold"
+                            >{number}</span
+                          >
                         {/each}
-                        <span class="ml-1 self-center font-bold text-zinc-600">{result.frequencyMatchCount ?? "n/a"}</span>
+                        <span class="ml-1 self-center font-bold text-zinc-600"
+                          >{result.frequencyMatchCount ?? "n/a"}</span
+                        >
                       </div>
                     {:else}
                       n/a
@@ -1194,9 +1613,26 @@
                     {#if result.randomPredictedNumbers}
                       <div class="flex min-w-48 flex-wrap gap-1">
                         {#each result.randomPredictedNumbers as number}
-                          <span class:bg-emerald-600={result.actualNumbers.includes(number)} class:text-white={result.actualNumbers.includes(number)} class:bg-zinc-200={!result.actualNumbers.includes(number)} class:text-zinc-700={!result.actualNumbers.includes(number)} class="inline-flex h-7 min-w-7 items-center justify-center rounded-full px-1.5 text-xs font-semibold">{number}</span>
+                          <span
+                            class:bg-emerald-600={result.actualNumbers.includes(
+                              number,
+                            )}
+                            class:text-white={result.actualNumbers.includes(
+                              number,
+                            )}
+                            class:bg-zinc-200={!result.actualNumbers.includes(
+                              number,
+                            )}
+                            class:text-zinc-700={!result.actualNumbers.includes(
+                              number,
+                            )}
+                            class="inline-flex h-7 min-w-7 items-center justify-center rounded-full px-1.5 text-xs font-semibold"
+                            >{number}</span
+                          >
                         {/each}
-                        <span class="ml-1 self-center font-bold text-zinc-600">{result.randomMatchCount ?? "n/a"}</span>
+                        <span class="ml-1 self-center font-bold text-zinc-600"
+                          >{result.randomMatchCount ?? "n/a"}</span
+                        >
                       </div>
                     {:else}
                       n/a
@@ -1206,9 +1642,26 @@
                     {#if result.heuristicPredictedNumbers}
                       <div class="flex min-w-48 flex-wrap gap-1">
                         {#each result.heuristicPredictedNumbers as number}
-                          <span class:bg-emerald-600={result.actualNumbers.includes(number)} class:text-white={result.actualNumbers.includes(number)} class:bg-zinc-200={!result.actualNumbers.includes(number)} class:text-zinc-700={!result.actualNumbers.includes(number)} class="inline-flex h-7 min-w-7 items-center justify-center rounded-full px-1.5 text-xs font-semibold">{number}</span>
+                          <span
+                            class:bg-emerald-600={result.actualNumbers.includes(
+                              number,
+                            )}
+                            class:text-white={result.actualNumbers.includes(
+                              number,
+                            )}
+                            class:bg-zinc-200={!result.actualNumbers.includes(
+                              number,
+                            )}
+                            class:text-zinc-700={!result.actualNumbers.includes(
+                              number,
+                            )}
+                            class="inline-flex h-7 min-w-7 items-center justify-center rounded-full px-1.5 text-xs font-semibold"
+                            >{number}</span
+                          >
                         {/each}
-                        <span class="ml-1 self-center font-bold text-zinc-600">{result.heuristicMatchCount ?? "n/a"}</span>
+                        <span class="ml-1 self-center font-bold text-zinc-600"
+                          >{result.heuristicMatchCount ?? "n/a"}</span
+                        >
                       </div>
                     {:else}
                       n/a
@@ -1218,9 +1671,26 @@
                     {#if result.ensemblePredictedNumbers}
                       <div class="flex min-w-48 flex-wrap gap-1">
                         {#each result.ensemblePredictedNumbers as number}
-                          <span class:bg-emerald-600={result.actualNumbers.includes(number)} class:text-white={result.actualNumbers.includes(number)} class:bg-zinc-200={!result.actualNumbers.includes(number)} class:text-zinc-700={!result.actualNumbers.includes(number)} class="inline-flex h-7 min-w-7 items-center justify-center rounded-full px-1.5 text-xs font-semibold">{number}</span>
+                          <span
+                            class:bg-emerald-600={result.actualNumbers.includes(
+                              number,
+                            )}
+                            class:text-white={result.actualNumbers.includes(
+                              number,
+                            )}
+                            class:bg-zinc-200={!result.actualNumbers.includes(
+                              number,
+                            )}
+                            class:text-zinc-700={!result.actualNumbers.includes(
+                              number,
+                            )}
+                            class="inline-flex h-7 min-w-7 items-center justify-center rounded-full px-1.5 text-xs font-semibold"
+                            >{number}</span
+                          >
                         {/each}
-                        <span class="ml-1 self-center font-bold text-zinc-600">{result.ensembleMatchCount ?? "n/a"}</span>
+                        <span class="ml-1 self-center font-bold text-zinc-600"
+                          >{result.ensembleMatchCount ?? "n/a"}</span
+                        >
                       </div>
                     {:else}
                       n/a

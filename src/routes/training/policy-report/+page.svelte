@@ -153,13 +153,13 @@
     <div class="flex gap-2">
       <a
         href="/training"
-        class="inline-flex items-center rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
+        class="inline-flex cursor-pointer items-center rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 transition-[transform,colors] duration-100 hover:bg-zinc-50 active:translate-y-px active:scale-[0.98] active:bg-zinc-100"
       >
         Back to Training
       </a>
       <a
         href="/training/policy-report/data?limit=120"
-        class="inline-flex items-center rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
+        class="inline-flex cursor-pointer items-center rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 transition-[transform,colors] duration-100 hover:bg-zinc-50 active:translate-y-px active:scale-[0.98] active:bg-zinc-100"
       >
         JSON Endpoint
       </a>

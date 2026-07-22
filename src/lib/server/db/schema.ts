@@ -89,6 +89,9 @@ export const nnTrainingRuns = sqliteTable(
     testSamples: integer("test_samples"),
     samplesTotal: integer("samples_total"),
     samplesProcessed: integer("samples_processed").notNull().default(0),
+    currentPhase: text("current_phase").notNull().default("final_training"),
+    currentFold: integer("current_fold").notNull().default(0),
+    totalFolds: integer("total_folds").notNull().default(0),
     modelFamily: text("model_family").notNull().default("mlp_v1"),
     hiddenLayersJson: text("hidden_layers_json").notNull(),
     hyperparamsJson: text("hyperparams_json").notNull(),
@@ -105,6 +108,7 @@ export const nnTrainingRuns = sqliteTable(
     inputEncoding: text("input_encoding").notNull().default("sorted_scalar_v1"),
     lossVersion: text("loss_version").notNull().default("binary_crossentropy_v1"),
     trainingSeed: integer("training_seed"),
+    isFavorite: integer("is_favorite", { mode: "boolean" }).notNull().default(false),
     isValid: integer("is_valid", { mode: "boolean" }).notNull().default(true),
     invalidatedAt: integer("invalidated_at", { mode: "timestamp_ms" }),
     invalidationReason: text("invalidation_reason"),
@@ -121,6 +125,37 @@ export const nnTrainingRuns = sqliteTable(
     holdoutScoreIdx: index("nn_training_runs_holdout_score_idx").on(
       table.holdoutScore,
     ),
+  }),
+);
+
+export const nnBacktestFolds = sqliteTable(
+  "nn_backtest_folds",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    runId: integer("run_id").notNull().references(() => nnTrainingRuns.id, { onDelete: "cascade" }),
+    fold: integer("fold").notNull(),
+    trainStartDate: text("train_start_date").notNull(),
+    trainEndDate: text("train_end_date").notNull(),
+    calibrationStartDate: text("calibration_start_date").notNull(),
+    calibrationEndDate: text("calibration_end_date").notNull(),
+    holdoutStartDate: text("holdout_start_date").notNull(),
+    holdoutEndDate: text("holdout_end_date").notNull(),
+    trainSamples: integer("train_samples").notNull(),
+    calibrationSamples: integer("calibration_samples").notNull(),
+    holdoutSamples: integer("holdout_samples").notNull(),
+    bestEpoch: integer("best_epoch"),
+    finalTrainLoss: text("final_train_loss"),
+    finalValLoss: text("final_val_loss"),
+    neuralScore: text("neural_score").notNull(),
+    ensembleScore: text("ensemble_score").notNull(),
+    gatedScore: text("gated_score").notNull(),
+    randomScore: text("random_score").notNull(),
+    selectedMethod: text("selected_method").notNull(),
+    diagnosticsJson: text("diagnostics_json").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull().$defaultFn(() => new Date()),
+  },
+  (table) => ({
+    runFoldIdx: uniqueIndex("nn_backtest_folds_run_fold_uq").on(table.runId, table.fold),
   }),
 );
 

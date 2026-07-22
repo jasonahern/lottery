@@ -1,0 +1,1 @@
+ALTER TABLE `nn_training_runs` ADD `is_favorite` integer DEFAULT false NOT NULL;
