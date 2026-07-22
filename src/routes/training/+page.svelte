@@ -135,6 +135,7 @@
   let earlyStoppingPatienceInput = $state("");
   let earlyStoppingMinDeltaInput = $state("");
   let trainingSeedInput = $state("");
+  let trainingSeedsInput = $state("");
   let enableRollingBacktestInput = $state(false);
   let rollingFoldsInput = $state("");
   let rollingHoldoutWeeksInput = $state("");
@@ -184,6 +185,7 @@
       earlyStoppingPatienceInput = String(config.earlyStoppingPatience);
       earlyStoppingMinDeltaInput = String(config.earlyStoppingMinDelta);
       trainingSeedInput = String(config.trainingSeed);
+      trainingSeedsInput = config.trainingSeeds.join(", ");
       enableRollingBacktestInput = config.enableRollingBacktest;
       rollingFoldsInput = String(config.rollingFolds);
       rollingHoldoutWeeksInput = String(config.rollingHoldoutWeeks);
@@ -211,6 +213,7 @@
       earlyStoppingPatienceInput = String(defaults.earlyStoppingPatience);
       earlyStoppingMinDeltaInput = String(defaults.earlyStoppingMinDelta);
       trainingSeedInput = String(defaults.trainingSeed);
+      trainingSeedsInput = defaults.trainingSeeds.join(", ");
       enableRollingBacktestInput = defaults.enableRollingBacktest;
       rollingFoldsInput = String(defaults.rollingFolds);
       rollingHoldoutWeeksInput = String(defaults.rollingHoldoutWeeks);
@@ -476,6 +479,11 @@
             Based on completed run #{nextDrawPrediction.runId}, using latest
             known draw #{nextDrawPrediction.basedOnDrawNumber} ({nextDrawPrediction.basedOnDrawDate}).
             The same six-number ticket applies to both Round 1 and Round 2.
+          </p>
+          <p class="mt-1 text-xs text-emerald-800">
+            Neural prediction uses equal probability averaging across
+            {nextDrawPrediction.neuralSeeds.length} seed member{nextDrawPrediction.neuralSeeds.length === 1 ? "" : "s"}:
+            {nextDrawPrediction.neuralSeeds.join(", ")}.
           </p>
           {#if pinnedPredictionRunId}
             <p class="mt-1 text-xs font-semibold text-emerald-800">
@@ -746,6 +754,10 @@
         Early stopping / seed: controls when training stops after validation
         stalls and makes repeated runs reproducible.
       </p>
+      <p class="mt-1 text-xs">
+        Neural seeds: trains identical networks with different random initialization,
+        then averages every number's probability before choosing six numbers.
+      </p>
     </div>
 
     <form
@@ -936,18 +948,17 @@
         </label>
 
         <label class="space-y-1 text-sm font-medium text-zinc-700">
-          Training seed
+          Neural seeds
           <input
-            type="number"
-            name="trainingSeed"
-            min="1"
-            max="2147483646"
-            step="1"
-            bind:value={trainingSeedInput}
+            type="text"
+            name="trainingSeeds"
+            bind:value={trainingSeedsInput}
             class="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-900 shadow-sm focus:border-zinc-500 focus:outline-none"
           />
+          <input type="hidden" name="trainingSeed" value={trainingSeedsInput.split(",")[0]?.trim() || trainingSeedInput} />
           <p class="text-xs font-normal text-zinc-500">
-            Reproduces initialization and dropout randomness. Start with 42.
+            Comma-separated unique seeds, maximum five. Try 42, 137, 176, 2026.
+            Runtime grows roughly once per seed; probabilities are equally averaged.
           </p>
         </label>
       </div>

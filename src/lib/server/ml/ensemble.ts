@@ -3,6 +3,15 @@ export type EnsembleMethod = "neural" | "frequency" | "heuristic" | "random";
 export type EnsembleWeights = Record<EnsembleMethod, number>;
 export type EnsembleScores = Record<EnsembleMethod, number[]>;
 
+export function averageProbabilityScores(scoreSets: number[][]): number[] {
+  if (scoreSets.length === 0) throw new Error("At least one probability score set is required.");
+  const width = scoreSets[0].length;
+  if (scoreSets.some((scores) => scores.length !== width)) throw new Error("Probability score sets must have the same width.");
+  return Array.from({ length: width }, (_, index) =>
+    scoreSets.reduce((sum, scores) => sum + scores[index], 0) / scoreSets.length,
+  );
+}
+
 export const DEFAULT_ENSEMBLE_WEIGHTS: EnsembleWeights = {
   neural: 0.45,
   frequency: 0.2,

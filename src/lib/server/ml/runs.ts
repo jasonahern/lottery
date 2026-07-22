@@ -202,10 +202,13 @@ function parseNullableNumber(value: string | null): number | null {
 export function buildTrainingConfig(
   input: Partial<TrainingConfig>,
 ): TrainingConfig {
+  const trainingSeed = input.trainingSeed ?? DEFAULT_TRAINING_CONFIG.trainingSeed;
   return {
     ...DEFAULT_TRAINING_CONFIG,
     ...input,
     hiddenLayers: input.hiddenLayers ?? DEFAULT_TRAINING_CONFIG.hiddenLayers,
+    trainingSeed,
+    trainingSeeds: input.trainingSeeds?.length ? input.trainingSeeds : [trainingSeed],
   };
 }
 
@@ -277,7 +280,7 @@ export function createTrainingRun(
       currentEpoch: 0,
       trainSamples: trainSamples.length,
       testSamples: testSamples.length,
-      samplesTotal: trainSamples.length * config.epochs * (config.enableRollingBacktest ? config.rollingFolds + 1 : 1),
+      samplesTotal: trainSamples.length * config.epochs * config.trainingSeeds.length * (config.enableRollingBacktest ? config.rollingFolds + 1 : 1),
       samplesProcessed: 0,
       currentPhase: "final_training",
       currentFold: 0,
@@ -355,7 +358,8 @@ export function markRunFailed(runId: number, errorMessage: string): void {
 
 export function markRunCompleted(runId: number): void {
   db.update(nnTrainingRuns)
-    .set({ status: "completed", endedAt: new Date(), currentPhase: "completed", currentFold: 0 })
+    .set({ status: "completed", endedAt: new Date(), currentPhase: "completed", currentFold: 0,
+      samplesProcessed: sql`coalesce(${nnTrainingRuns.samplesTotal}, ${nnTrainingRuns.samplesProcessed})` })
     .where(eq(nnTrainingRuns.id, runId))
     .run();
 }
@@ -629,9 +633,12 @@ export function getTrainingRunFormConfig(runId: number): TrainingRunFormConfig |
   if (!row) return null;
 
   const parsed = JSON.parse(row.hyperparamsJson) as Partial<TrainingConfig>;
+  const trainingSeed = parsed.trainingSeed ?? DEFAULT_TRAINING_CONFIG.trainingSeed;
   return {
     ...DEFAULT_TRAINING_CONFIG,
     ...parsed,
+    trainingSeed,
+    trainingSeeds: parsed.trainingSeeds?.length ? parsed.trainingSeeds : [trainingSeed],
     hiddenLayers: JSON.parse(row.hiddenLayersJson) as number[],
     runId: row.id,
     status: row.status,

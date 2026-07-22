@@ -19,7 +19,7 @@ export type EnsembleCalibrationSample = {
 };
 
 export async function calibrateEnsemble(params: {
-  model: tf.Sequential;
+  models: tf.Sequential[];
   samples: EnsembleCalibrationSample[];
   outputNumbers: number[];
   inputSize: number;
@@ -29,6 +29,17 @@ export async function calibrateEnsemble(params: {
   bootstrapIterations: number;
   seed: number;
 }): Promise<{ weights: EnsembleWeights; calibratedWeights: EnsembleWeights; diagnostics: ReliabilityGateDiagnostics }> {
+  if (params.models.length === 0) throw new Error("Calibration requires at least one Neural member.");
+  const predictNeural = async (input: tf.Tensor2D): Promise<number[]> => {
+    const totals = new Array(params.outputNumbers.length).fill(0);
+    for (const model of params.models) {
+      const prediction = model.predict(input) as tf.Tensor;
+      const values = await prediction.data();
+      values.forEach((value, index) => totals[index] += value);
+      prediction.dispose();
+    }
+    return totals.map((value) => value / params.models.length);
+  };
   const gateCount = Math.max(1, Math.floor(params.samples.length * 0.25));
   const learningSamples = params.samples.slice(0, -gateCount);
   const gateSamples = params.samples.slice(-gateCount);
@@ -36,8 +47,7 @@ export async function calibrateEnsemble(params: {
 
   for (const sample of learningSamples) {
     const input = tf.tensor2d([sample.input], [1, params.inputSize]);
-    const prediction = params.model.predict(input) as tf.Tensor;
-    const neural = Array.from(await prediction.data());
+    const neural = await predictNeural(input);
     learningRecords.push({
       scores: {
         neural,
@@ -47,7 +57,7 @@ export async function calibrateEnsemble(params: {
       },
       targetNumbers: sample.targetNumbers,
     });
-    input.dispose(); prediction.dispose();
+    input.dispose();
   }
 
   let weights = collapseDuplicateExpertWeights(
@@ -66,8 +76,7 @@ export async function calibrateEnsemble(params: {
   const observations = [];
   for (const sample of gateSamples) {
     const input = tf.tensor2d([sample.input], [1, params.inputSize]);
-    const prediction = params.model.predict(input) as tf.Tensor;
-    const neural = Array.from(await prediction.data());
+    const neural = await predictNeural(input);
     const componentScores: EnsembleScores = {
       neural,
       frequency: buildRecentFrequencyScores(sample.inputWindow, params.outputNumbers),
@@ -79,7 +88,7 @@ export async function calibrateEnsemble(params: {
       neuralMatches: countMatches(pickTopKNumbers(neural, params.outputNumbers, sample.targetNumbers.length), sample.targetNumbers),
       ensembleMatches: countMatches(pickTopKNumbers(blendEnsembleScores(componentScores, weights), params.outputNumbers, sample.targetNumbers.length), sample.targetNumbers),
     });
-    input.dispose(); prediction.dispose();
+    input.dispose();
   }
   const diagnostics = evaluateReliabilityGate(observations, {
     confidenceLevel: params.confidenceLevel, minimumAdvantage: params.minimumAdvantage,

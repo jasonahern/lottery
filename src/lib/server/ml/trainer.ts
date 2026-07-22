@@ -8,6 +8,7 @@ import {
   DEFAULT_TRAINING_CONFIG,
   type TrainingConfig,
   validateTrainingConfig,
+  resolveTrainingSeeds,
 } from "./config";
 import {
   createWindowedSamples,
@@ -28,6 +29,7 @@ import {
 } from "./features";
 import { buildHeuristicScores, pickHeuristicNumbers } from "./heuristic";
 import {
+  averageProbabilityScores,
   blendEnsembleScores,
   buildSeededRandomScores,
 } from "./ensemble";
@@ -57,8 +59,34 @@ type WindowedVectorSample = {
 
 const runningRunIds = new Set<number>();
 
+type TrainedMember = {
+  seed: number;
+  model: tf.Sequential;
+  bestEpoch: number | null;
+  finalTrainLoss: number | null;
+  finalValLoss: number | null;
+};
+
 function disposeWeights(weights: readonly tf.Tensor[] | null): void {
   weights?.forEach((weight) => weight.dispose());
+}
+
+async function averageModelScores(models: tf.Sequential[], input: tf.Tensor2D, outputSize: number): Promise<number[]> {
+  if (models.length === 0) throw new Error("No trained Neural members are available.");
+  return averageProbabilityScores(await predictMemberScores(models, input, outputSize));
+}
+
+async function predictMemberScores(models: tf.Sequential[], input: tf.Tensor2D, outputSize: number): Promise<number[][]> {
+  if (models.length === 0) throw new Error("No trained Neural members are available.");
+  const scoreSets: number[][] = [];
+  for (const model of models) {
+    const prediction = model.predict(input) as tf.Tensor;
+    const values = await prediction.data();
+    scoreSets.push(Array.from(values));
+    prediction.dispose();
+  }
+  if (scoreSets.some((scores) => scores.length !== outputSize)) throw new Error("Neural member output width does not match the vocabulary.");
+  return scoreSets;
 }
 
 function getRunConfig(runId: number): TrainingConfig {
@@ -74,9 +102,13 @@ function getRunConfig(runId: number): TrainingConfig {
     throw new Error(`Training run ${runId} not found.`);
   }
 
+  const stored = JSON.parse(loaded.hyperparamsJson) as Partial<TrainingConfig>;
+  const trainingSeed = stored.trainingSeed ?? DEFAULT_TRAINING_CONFIG.trainingSeed;
   const parsed = {
     ...DEFAULT_TRAINING_CONFIG,
-    ...(JSON.parse(loaded.hyperparamsJson) as Partial<TrainingConfig>),
+    ...stored,
+    trainingSeed,
+    trainingSeeds: stored.trainingSeeds?.length ? stored.trainingSeeds : [trainingSeed],
   };
   const errors = validateTrainingConfig(parsed);
   if (errors.length > 0) {
@@ -165,6 +197,7 @@ function buildModel(
   config: TrainingConfig,
   inputSize: number,
   outputSize: number,
+  seed = config.trainingSeed,
 ): tf.Sequential {
   const model = tf.sequential();
 
@@ -174,12 +207,12 @@ function buildModel(
         units,
         activation: config.activation,
         inputShape: idx === 0 ? [inputSize] : undefined,
-        kernelInitializer: tf.initializers.glorotUniform({ seed: config.trainingSeed + idx }),
+        kernelInitializer: tf.initializers.glorotUniform({ seed: seed + idx }),
       }),
     );
 
     if (config.dropoutRate > 0) {
-      model.add(tf.layers.dropout({ rate: config.dropoutRate, seed: config.trainingSeed + idx }));
+      model.add(tf.layers.dropout({ rate: config.dropoutRate, seed: seed + idx }));
     }
   });
 
@@ -187,7 +220,7 @@ function buildModel(
     tf.layers.dense({
       units: outputSize,
       activation: "sigmoid",
-      kernelInitializer: tf.initializers.glorotUniform({ seed: config.trainingSeed + 1000 }),
+      kernelInitializer: tf.initializers.glorotUniform({ seed: seed + 1000 }),
     }),
   );
 
@@ -233,33 +266,36 @@ async function runRollingBacktests(params: {
     const yTrain = tf.tensor2d(fold.train.map((sample) => sample.targetMultiHot), [fold.train.length, outputSize]);
     const xCalibration = tf.tensor2d(fold.calibration.map((sample) => sample.input), [fold.calibration.length, inputSize]);
     const yCalibration = tf.tensor2d(fold.calibration.map((sample) => sample.targetMultiHot), [fold.calibration.length, outputSize]);
-    const model = buildModel(params.config, inputSize, outputSize);
-    let bestWeights: tf.Tensor[] | null = null;
-    let bestValLoss = Number.POSITIVE_INFINITY;
-    let bestEpoch: number | null = null;
-    let staleEpochs = 0;
-    let finalTrainLoss: number | null = null;
-    let finalValLoss: number | null = null;
+    const members: TrainedMember[] = [];
     try {
-      await model.fit(xTrain, yTrain, {
-        epochs: params.config.epochs, batchSize: params.config.batchSize, shuffle: false,
-        validationData: [xCalibration, yCalibration],
-        callbacks: { onEpochEnd: async (epoch, logs) => {
-          finalTrainLoss = typeof logs?.loss === "number" ? logs.loss : finalTrainLoss;
-          finalValLoss = typeof logs?.val_loss === "number" ? logs.val_loss : finalValLoss;
-          if (typeof logs?.val_loss === "number" && logs.val_loss < bestValLoss - params.config.earlyStoppingMinDelta) {
-            bestValLoss = logs.val_loss; bestEpoch = epoch + 1; staleEpochs = 0;
-            disposeWeights(bestWeights); bestWeights = model.getWeights().map((weight) => weight.clone());
-          } else if (++staleEpochs >= params.config.earlyStoppingPatience) model.stopTraining = true;
-          updateBacktestProgress(
-            params.runId, fold.fold, folds.length,
-            params.baseProcessed + (fold.fold - 1) * params.config.epochs * fold.train.length + (epoch + 1) * fold.train.length,
-          );
-        } },
-      });
-      if (bestWeights) model.setWeights(bestWeights);
+      const seeds = resolveTrainingSeeds(params.config);
+      for (let memberIndex = 0; memberIndex < seeds.length; memberIndex += 1) {
+        const seed = seeds[memberIndex];
+        const model = buildModel(params.config, inputSize, outputSize, seed);
+        let bestWeights: tf.Tensor[] | null = null;
+        let bestValLoss = Number.POSITIVE_INFINITY, bestEpoch: number | null = null, staleEpochs = 0;
+        let finalTrainLoss: number | null = null, finalValLoss: number | null = null;
+        await model.fit(xTrain, yTrain, {
+          epochs: params.config.epochs, batchSize: params.config.batchSize, shuffle: false,
+          validationData: [xCalibration, yCalibration],
+          callbacks: { onEpochEnd: async (epoch, logs) => {
+            finalTrainLoss = typeof logs?.loss === "number" ? logs.loss : finalTrainLoss;
+            finalValLoss = typeof logs?.val_loss === "number" ? logs.val_loss : finalValLoss;
+            if (typeof logs?.val_loss === "number" && logs.val_loss < bestValLoss - params.config.earlyStoppingMinDelta) {
+              bestValLoss = logs.val_loss; bestEpoch = epoch + 1; staleEpochs = 0;
+              disposeWeights(bestWeights); bestWeights = model.getWeights().map((weight) => weight.clone());
+            } else if (++staleEpochs >= params.config.earlyStoppingPatience) model.stopTraining = true;
+            const completedUnits = ((fold.fold - 1) * seeds.length + memberIndex) * params.config.epochs * fold.train.length;
+            updateBacktestProgress(params.runId, fold.fold, folds.length,
+              params.baseProcessed + completedUnits + (epoch + 1) * fold.train.length);
+          } },
+        });
+        if (bestWeights) model.setWeights(bestWeights);
+        disposeWeights(bestWeights);
+        members.push({ seed, model, bestEpoch, finalTrainLoss, finalValLoss });
+      }
       const calibration = await calibrateEnsemble({
-        model, samples: fold.calibration, outputNumbers: params.outputNumbers, inputSize,
+        models: members.map((member) => member.model), samples: fold.calibration, outputNumbers: params.outputNumbers, inputSize,
         confidenceLevel: params.config.reliabilityConfidenceLevel,
         minimumAdvantage: params.config.reliabilityMinimumAdvantage,
         minimumGroups: params.config.reliabilityMinimumGroups,
@@ -269,8 +305,7 @@ async function runRollingBacktests(params: {
       let neuralTotal = 0, ensembleTotal = 0, gatedTotal = 0, randomTotal = 0;
       for (const sample of fold.holdout) {
         const input = tf.tensor2d([sample.input], [1, inputSize]);
-        const prediction = model.predict(input) as tf.Tensor;
-        const neuralScores = Array.from(await prediction.data());
+        const neuralScores = await averageModelScores(members.map((member) => member.model), input, outputSize);
         const randomScores = buildSeededRandomScores(params.outputNumbers.length, sample.targetDrawNumber);
         const components = {
           neural: neuralScores,
@@ -282,7 +317,7 @@ async function runRollingBacktests(params: {
         ensembleTotal += countMatches(pickTopKNumbers(blendEnsembleScores(components, calibration.calibratedWeights), params.outputNumbers, sample.targetNumbers.length), sample.targetNumbers);
         gatedTotal += countMatches(pickTopKNumbers(blendEnsembleScores(components, calibration.weights), params.outputNumbers, sample.targetNumbers.length), sample.targetNumbers);
         randomTotal += countMatches(pickTopKNumbers(randomScores, params.outputNumbers, sample.targetNumbers.length), sample.targetNumbers);
-        input.dispose(); prediction.dispose();
+        input.dispose();
       }
       const first = (items: WindowedVectorSample[]) => items[0].targetDrawDate;
       const last = (items: WindowedVectorSample[]) => items.at(-1)!.targetDrawDate;
@@ -292,17 +327,20 @@ async function runRollingBacktests(params: {
         calibrationStartDate: first(fold.calibration), calibrationEndDate: last(fold.calibration),
         holdoutStartDate: first(fold.holdout), holdoutEndDate: last(fold.holdout),
         trainSamples: fold.train.length, calibrationSamples: fold.calibration.length,
-        holdoutSamples: fold.holdout.length, bestEpoch, finalTrainLoss, finalValLoss,
+        holdoutSamples: fold.holdout.length,
+        bestEpoch: Math.round(members.reduce((sum, member) => sum + (member.bestEpoch ?? 0), 0) / members.length) || null,
+        finalTrainLoss: members.reduce((sum, member) => sum + (member.finalTrainLoss ?? 0), 0) / members.length,
+        finalValLoss: members.reduce((sum, member) => sum + (member.finalValLoss ?? 0), 0) / members.length,
         neuralScore: neuralTotal / fold.holdout.length,
         ensembleScore: ensembleTotal / fold.holdout.length,
         gatedScore: gatedTotal / fold.holdout.length,
         randomScore: randomTotal / fold.holdout.length,
         selectedMethod: calibration.diagnostics.selectedMethod,
-        diagnostics: calibration.diagnostics as unknown as Record<string, unknown>,
+        diagnostics: { ...calibration.diagnostics, neuralMode: "multi_seed_probability_average", seeds } as unknown as Record<string, unknown>,
       });
     } finally {
       xTrain.dispose(); yTrain.dispose(); xCalibration.dispose(); yCalibration.dispose();
-      model.dispose(); disposeWeights(bestWeights);
+      members.forEach((member) => member.model.dispose());
     }
   }
 }
@@ -322,8 +360,7 @@ async function runTrainingJob(runId: number): Promise<void> {
   let yTrain: tf.Tensor2D | null = null;
   let xCalibration: tf.Tensor2D | null = null;
   let yCalibration: tf.Tensor2D | null = null;
-  let model: tf.Sequential | null = null;
-  let bestWeights: tf.Tensor[] | null = null;
+  const members: TrainedMember[] = [];
 
   try {
     xTrain = tf.tensor2d(
@@ -337,60 +374,43 @@ async function runTrainingJob(runId: number): Promise<void> {
     xCalibration = tf.tensor2d(calibrationSamples.map((s) => s.input), [calibrationSamples.length, inputSize]);
     yCalibration = tf.tensor2d(calibrationSamples.map((s) => s.targetMultiHot), [calibrationSamples.length, outputSize]);
 
-    model = buildModel(config, inputSize, outputSize);
     const samplesPerEpoch = baseTrainingSamples.length;
 
     markRunRunning(runId);
 
     const startedAt = Date.now();
-    let bestValLoss = Number.POSITIVE_INFINITY;
-    let bestEpoch: number | null = null;
-    let epochsWithoutImprovement = 0;
-
-    await model.fit(xTrain, yTrain, {
-      epochs: config.epochs,
-      batchSize: config.batchSize,
-      shuffle: false,
-      validationData: [xCalibration, yCalibration],
-      callbacks: {
-        onEpochEnd: async (epoch: number, logs?: tf.Logs) => {
+    const seeds = resolveTrainingSeeds(config);
+    for (let memberIndex = 0; memberIndex < seeds.length; memberIndex += 1) {
+      const seed = seeds[memberIndex];
+      const model = buildModel(config, inputSize, outputSize, seed);
+      let bestWeights: tf.Tensor[] | null = null;
+      let bestValLoss = Number.POSITIVE_INFINITY, bestEpoch: number | null = null, epochsWithoutImprovement = 0;
+      let finalTrainLoss: number | null = null, finalValLoss: number | null = null;
+      await model.fit(xTrain, yTrain, {
+        epochs: config.epochs, batchSize: config.batchSize, shuffle: false,
+        validationData: [xCalibration, yCalibration],
+        callbacks: { onEpochEnd: async (epoch: number, logs?: tf.Logs) => {
           const epochNumber = epoch + 1;
-          if (typeof logs?.val_loss === "number") {
-            if (logs.val_loss < bestValLoss - config.earlyStoppingMinDelta) {
-              bestValLoss = logs.val_loss;
-              bestEpoch = epochNumber;
-              epochsWithoutImprovement = 0;
-              disposeWeights(bestWeights);
-              bestWeights = model?.getWeights().map((weight) => weight.clone()) ?? null;
-            } else {
-              epochsWithoutImprovement += 1;
-              if (epochsWithoutImprovement >= config.earlyStoppingPatience && model) {
-                model.stopTraining = true;
-              }
-            }
-          }
-          const elapsedMs = Date.now() - startedAt;
-          updateRunEpochProgress({
-            runId,
-            epoch: epochNumber,
-            totalEpochs: config.epochs,
-            trainLoss: typeof logs?.loss === "number" ? logs.loss : undefined,
-            valLoss:
-              typeof logs?.val_loss === "number" ? logs.val_loss : undefined,
-            elapsedMs,
-            samplesProcessed: epochNumber * samplesPerEpoch,
-          });
-        },
-      },
-    });
-
-    if (bestWeights) {
-      model.setWeights(bestWeights);
+          finalTrainLoss = typeof logs?.loss === "number" ? logs.loss : finalTrainLoss;
+          finalValLoss = typeof logs?.val_loss === "number" ? logs.val_loss : finalValLoss;
+          if (typeof logs?.val_loss === "number" && logs.val_loss < bestValLoss - config.earlyStoppingMinDelta) {
+            bestValLoss = logs.val_loss; bestEpoch = epochNumber; epochsWithoutImprovement = 0;
+            disposeWeights(bestWeights); bestWeights = model.getWeights().map((weight) => weight.clone());
+          } else if (++epochsWithoutImprovement >= config.earlyStoppingPatience) model.stopTraining = true;
+          updateRunEpochProgress({ runId, epoch: epochNumber, totalEpochs: config.epochs,
+            trainLoss: finalTrainLoss ?? undefined, valLoss: finalValLoss ?? undefined,
+            elapsedMs: Date.now() - startedAt,
+            samplesProcessed: (memberIndex * config.epochs + epochNumber) * samplesPerEpoch });
+        } },
+      });
+      if (bestWeights) model.setWeights(bestWeights);
+      disposeWeights(bestWeights);
+      members.push({ seed, model, bestEpoch, finalTrainLoss, finalValLoss });
     }
 
     let totalMatches = 0;
     const calibration = await calibrateEnsemble({
-      model, samples: calibrationSamples, outputNumbers, inputSize,
+      models: members.map((member) => member.model), samples: calibrationSamples, outputNumbers, inputSize,
       confidenceLevel: config.reliabilityConfidenceLevel,
       minimumAdvantage: config.reliabilityMinimumAdvantage,
       minimumGroups: config.reliabilityMinimumGroups,
@@ -401,11 +421,14 @@ async function runTrainingJob(runId: number): Promise<void> {
     const ensembleReliability = calibration.diagnostics;
 
     const methodTotals = { neural: 0, frequency: 0, random: 0, heuristic: 0, ensemble: 0 };
+    const memberTotals = new Array(members.length).fill(0);
+    let pairOverlapTotal = 0, pairOverlapCount = 0;
+    const distinctMemberPicks = new Set<number>();
 
     for (const sample of holdoutSamples) {
       const inputTensor = tf.tensor2d([sample.input], [1, inputSize]);
-      const prediction = model.predict(inputTensor) as tf.Tensor;
-      const scores = Array.from(await prediction.data());
+      const memberScores = await predictMemberScores(members.map((member) => member.model), inputTensor, outputSize);
+      const scores = averageProbabilityScores(memberScores);
       const recentFrequencyScores = buildRecentFrequencyScores(
         sample.inputWindow,
         outputNumbers,
@@ -415,6 +438,16 @@ async function runTrainingJob(runId: number): Promise<void> {
         outputNumbers,
         sample.targetNumbers.length,
       );
+      const memberPicks = memberScores.map((scoresForMember) =>
+        pickTopKNumbers(scoresForMember, outputNumbers, sample.targetNumbers.length));
+      memberPicks.forEach((picks, index) => {
+        memberTotals[index] += countMatches(picks, sample.targetNumbers);
+        picks.forEach((number) => distinctMemberPicks.add(number));
+      });
+      for (let left = 0; left < memberPicks.length; left += 1) for (let right = left + 1; right < memberPicks.length; right += 1) {
+        pairOverlapTotal += memberPicks[left].filter((number) => memberPicks[right].includes(number)).length;
+        pairOverlapCount += 1;
+      }
       const matchCount = countMatches(predictedNumbers, sample.targetNumbers);
       const topKHit = matchCount > 0;
       const frequencyPredictedNumbers = pickFrequencyBaselineNumbers(
@@ -542,7 +575,6 @@ async function runTrainingJob(runId: number): Promise<void> {
       methodTotals.ensemble += ensembleMatchCount;
 
       inputTensor.dispose();
-      prediction.dispose();
     }
 
     if (config.enableRollingBacktest) {
@@ -551,13 +583,13 @@ async function runTrainingJob(runId: number): Promise<void> {
         config,
         samples: [...trainingSamples, ...holdoutSamples],
         outputNumbers,
-        baseProcessed: config.epochs * baseTrainingSamples.length,
+        baseProcessed: config.epochs * baseTrainingSamples.length * seeds.length,
       });
     }
 
     const averageMatches = totalMatches / holdoutSamples.length;
 
-    const serializedWeights = model.weights.map((weight) => {
+    const serializeWeights = (model: tf.Sequential) => model.weights.map((weight) => {
       const values = Array.from(weight.read().dataSync());
       return {
         name: weight.name,
@@ -565,6 +597,12 @@ async function runTrainingJob(runId: number): Promise<void> {
         values,
       };
     });
+    const serializedMembers = members.map((member, index) => ({
+      seed: member.seed, bestEpoch: member.bestEpoch,
+      finalTrainLoss: member.finalTrainLoss, finalValLoss: member.finalValLoss,
+      holdoutAverageMatches: memberTotals[index] / holdoutSamples.length,
+      weights: serializeWeights(member.model),
+    }));
 
     await saveModelArtifact({
       runId,
@@ -574,13 +612,19 @@ async function runTrainingJob(runId: number): Promise<void> {
       inputSize,
       outputSize,
       outputNumbers,
-      weights: serializedWeights,
+      weights: serializedMembers[0].weights,
+      members: serializedMembers,
+      averagingMethod: "equal_probability_mean",
+      neuralDiversity: {
+        averageTopSixOverlap: pairOverlapCount ? pairOverlapTotal / pairOverlapCount : 6,
+        distinctTopSixNumbers: distinctMemberPicks.size,
+      },
       ensembleWeights,
-      ensembleVersion: "confidence-aware-reliability-gate-v4",
+      ensembleVersion: "multi-seed-confidence-aware-gate-v5",
       ensembleReliability,
       inputEncoding: "windowed_multi_hot_v1",
       lossVersion: "weighted_bce_v1",
-      trainingSeed: config.trainingSeed,
+      trainingSeed: seeds[0],
     });
 
     await cleanupOldArtifacts(20);
@@ -595,8 +639,8 @@ async function runTrainingJob(runId: number): Promise<void> {
         randomHoldoutScore: (methodTotals.random / holdoutSamples.length).toFixed(4),
         inputEncoding: "windowed_multi_hot_v1",
         lossVersion: "weighted_bce_v1",
-        trainingSeed: config.trainingSeed,
-        bestEpoch,
+        trainingSeed: seeds[0],
+        bestEpoch: Math.round(members.reduce((sum, member) => sum + (member.bestEpoch ?? 0), 0) / members.length) || null,
       })
       .where(eq(nnTrainingRuns.id, runId))
       .run();
@@ -607,8 +651,7 @@ async function runTrainingJob(runId: number): Promise<void> {
     yTrain?.dispose();
     xCalibration?.dispose();
     yCalibration?.dispose();
-    model?.dispose();
-    disposeWeights(bestWeights);
+    members.forEach((member) => member.model.dispose());
     await tf.nextFrame();
   }
 }

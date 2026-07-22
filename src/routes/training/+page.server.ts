@@ -14,6 +14,7 @@ import {
 } from "$lib/server/ml/policy";
 import {
   DEFAULT_TRAINING_CONFIG,
+  parseTrainingSeedsInput,
   parseHiddenLayersInput,
   resolveHiddenLayers,
   type TrainingPreset,
@@ -346,6 +347,7 @@ export const actions: Actions = {
           form.get("trainingSeed"),
           DEFAULT_TRAINING_CONFIG.trainingSeed,
         ),
+        trainingSeeds: parseTrainingSeedsInput(String(form.get("trainingSeeds") ?? form.get("trainingSeed") ?? DEFAULT_TRAINING_CONFIG.trainingSeed)),
         enableRollingBacktest: form.get("enableRollingBacktest") === "on",
         rollingFolds: coercePositiveInt(form.get("rollingFolds"), DEFAULT_TRAINING_CONFIG.rollingFolds),
         rollingHoldoutWeeks: coercePositiveInt(form.get("rollingHoldoutWeeks"), DEFAULT_TRAINING_CONFIG.rollingHoldoutWeeks),

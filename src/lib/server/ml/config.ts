@@ -14,6 +14,7 @@ export type TrainingConfig = {
   modelFamily: string;
   currentEraStartDate: string | null;
   trainingSeed: number;
+  trainingSeeds: number[];
   positiveClassWeight: number;
   earlyStoppingPatience: number;
   earlyStoppingMinDelta: number;
@@ -48,6 +49,7 @@ export const DEFAULT_TRAINING_CONFIG: TrainingConfig = {
   modelFamily: "mlp_v2",
   currentEraStartDate: "2015-10-09",
   trainingSeed: 42,
+  trainingSeeds: [42],
   positiveClassWeight: 53 / 6,
   earlyStoppingPatience: 12,
   earlyStoppingMinDelta: 0.0001,
@@ -66,7 +68,16 @@ export const MAX_TRAINING_LIMITS = {
   maxNeuronsPerLayer: 1024,
   maxEpochs: 500,
   maxBatchSize: 1024,
+  maxTrainingSeeds: 5,
 };
+
+export function parseTrainingSeedsInput(value: string): number[] {
+  return [...new Set(value.split(",").map((part) => Number(part.trim())).filter((seed) => Number.isInteger(seed) && seed > 0))];
+}
+
+export function resolveTrainingSeeds(config: Pick<TrainingConfig, "trainingSeed" | "trainingSeeds">): number[] {
+  return config.trainingSeeds.length > 0 ? config.trainingSeeds : [config.trainingSeed];
+}
 
 function isFinitePositiveInteger(value: unknown): value is number {
   return Number.isInteger(value) && Number(value) > 0;
@@ -165,6 +176,13 @@ export function validateTrainingConfig(config: TrainingConfig): string[] {
 
   if (!isFinitePositiveInteger(config.trainingSeed)) {
     errors.push("trainingSeed must be a positive integer.");
+  }
+  if (!Array.isArray(config.trainingSeeds) || config.trainingSeeds.length === 0) {
+    errors.push("trainingSeeds must contain at least one seed.");
+  } else if (config.trainingSeeds.length > MAX_TRAINING_LIMITS.maxTrainingSeeds) {
+    errors.push(`trainingSeeds must contain at most ${MAX_TRAINING_LIMITS.maxTrainingSeeds} seeds.`);
+  } else if (new Set(config.trainingSeeds).size !== config.trainingSeeds.length || config.trainingSeeds.some((seed) => !isFinitePositiveInteger(seed))) {
+    errors.push("trainingSeeds must contain unique positive integers.");
   }
   if (!isFinitePositiveNumber(config.positiveClassWeight)) {
     errors.push("positiveClassWeight must be a positive number.");

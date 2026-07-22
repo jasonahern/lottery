@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  averageProbabilityScores,
   blendEnsembleScores,
   buildSeededRandomScores,
   DEFAULT_ENSEMBLE_WEIGHTS,
@@ -11,6 +12,13 @@ import {
   getEffectiveEnsembleWeights,
   collapseDuplicateExpertWeights,
 } from "./ensemble";
+
+test("averageProbabilityScores averages by output number and validates dimensions", () => {
+  assert.deepEqual(averageProbabilityScores([[0.2, 0.8], [0.6, 0.4]]), [0.4, 0.6000000000000001]);
+  assert.deepEqual(averageProbabilityScores([[0.2, 0.8]]), [0.2, 0.8]);
+  assert.throws(() => averageProbabilityScores([]));
+  assert.throws(() => averageProbabilityScores([[0.1], [0.1, 0.2]]));
+});
 
 test("normalizeScores converts incomparable scales to ranks", () => {
   assert.deepEqual(normalizeScores([100, -2, 4]), [1, 0, 0.5]);

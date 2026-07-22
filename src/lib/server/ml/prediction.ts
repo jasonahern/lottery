@@ -41,6 +41,11 @@ type SerializedModelArtifact = {
     shape: number[];
     values: number[];
   }>;
+  members?: Array<{
+    seed: number;
+    weights: Array<{ name: string; shape: number[]; values: number[] }>;
+  }>;
+  averagingMethod?: "equal_probability_mean";
   ensembleWeights?: EnsembleWeights;
   ensembleVersion?: string;
   ensembleReliability?: ReliabilityGateDiagnostics;
@@ -62,6 +67,8 @@ export type NextDrawPrediction = {
   randomPredictedNumbers: number[];
   ensembleWeights: EnsembleWeights;
   ensembleReliability: SerializedModelArtifact["ensembleReliability"] | null;
+  neuralSeeds: number[];
+  neuralAveragingMethod: "equal_probability_mean";
   generatedAt: string;
 };
 
@@ -217,26 +224,29 @@ export async function getNextDrawPrediction(
     artifact.inputEncoding ?? "sorted_scalar_v1",
   );
 
-  let model: tf.Sequential | null = null;
+  const models: tf.Sequential[] = [];
   let inputTensor: tf.Tensor2D | null = null;
   let predictionTensor: tf.Tensor | null = null;
 
   try {
-    model = buildInferenceModel({
-      hiddenLayers: artifact.hiddenLayers,
-      inputSize: artifact.inputSize,
-      outputSize: artifact.outputSize,
-      activation,
-      weights: artifact.weights.map((w) => ({
-        shape: w.shape,
-        values: w.values,
-      })),
-    });
+    const artifactMembers = artifact.members?.length
+      ? artifact.members
+      : [{ seed: artifact.trainingSeed ?? 42, weights: artifact.weights }];
+    for (const member of artifactMembers) {
+      models.push(buildInferenceModel({ hiddenLayers: artifact.hiddenLayers,
+        inputSize: artifact.inputSize, outputSize: artifact.outputSize, activation,
+        weights: member.weights.map((weight) => ({ shape: weight.shape, values: weight.values })) }));
+    }
 
     inputTensor = tf.tensor2d([inferenceInput.input], [1, artifact.inputSize]);
-    predictionTensor = model.predict(inputTensor) as tf.Tensor;
-
-    const scores = Array.from(await predictionTensor.data());
+    const scoreTotals = new Array(artifact.outputSize).fill(0);
+    for (const memberModel of models) {
+      predictionTensor = memberModel.predict(inputTensor) as tf.Tensor;
+      const memberScores = await predictionTensor.data();
+      memberScores.forEach((value, index) => scoreTotals[index] += value);
+      predictionTensor.dispose(); predictionTensor = null;
+    }
+    const scores = scoreTotals.map((value) => value / models.length);
     const recentFrequencyScores = buildRecentFrequencyScores(
       inferenceInput.latestWindow,
       artifact.outputNumbers,
@@ -328,12 +338,14 @@ export async function getNextDrawPrediction(
       randomPredictedNumbers,
       ensembleWeights: effectiveEnsembleWeights,
       ensembleReliability: artifact.ensembleReliability ?? null,
+      neuralSeeds: artifactMembers.map((member) => member.seed),
+      neuralAveragingMethod: "equal_probability_mean",
       generatedAt: new Date().toISOString(),
     };
   } finally {
     predictionTensor?.dispose();
     inputTensor?.dispose();
-    model?.dispose();
+    models.forEach((model) => model.dispose());
     await tf.nextFrame();
   }
 }

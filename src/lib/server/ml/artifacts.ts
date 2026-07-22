@@ -28,6 +28,16 @@ export type SerializedModelArtifact = {
   outputSize: number;
   outputNumbers: number[];
   weights: SerializableWeight[];
+  members?: Array<{
+    seed: number;
+    bestEpoch: number | null;
+    finalTrainLoss: number | null;
+    finalValLoss: number | null;
+    holdoutAverageMatches?: number;
+    weights: SerializableWeight[];
+  }>;
+  averagingMethod?: "equal_probability_mean";
+  neuralDiversity?: { averageTopSixOverlap: number; distinctTopSixNumbers: number };
   ensembleWeights?: EnsembleWeights;
   ensembleVersion?: string;
   ensembleReliability?: ReliabilityGateDiagnostics;

@@ -4,9 +4,15 @@ import assert from "node:assert/strict";
 import {
   DEFAULT_TRAINING_CONFIG,
   parseHiddenLayersInput,
+  parseTrainingSeedsInput,
   resolveHiddenLayers,
   validateTrainingConfig,
 } from "./config";
+
+test("parseTrainingSeedsInput normalizes unique positive integer seeds", () => {
+  assert.deepEqual(parseTrainingSeedsInput("42, 137, 42, 2026"), [42, 137, 2026]);
+  assert.deepEqual(parseTrainingSeedsInput("bad, -1, 7.5, 176"), [176]);
+});
 
 test("parseHiddenLayersInput parses and normalizes values", () => {
   const parsed = parseHiddenLayersInput("128, 64, 32");
