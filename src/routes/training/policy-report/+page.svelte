@@ -322,7 +322,7 @@
       </p>
     {:else}
       <div class="mt-3 overflow-x-auto">
-        <table class="w-full min-w-[860px] border-collapse text-sm">
+        <table class="w-full min-w-215 border-collapse text-sm">
           <thead>
             <tr class="border-b border-zinc-200 text-left text-zinc-600">
               <th class="px-3 py-2 font-semibold">Outcome ID</th>
@@ -358,7 +358,7 @@
       <p class="mt-2 text-sm text-zinc-600">No policy updates recorded yet.</p>
     {:else}
       <div class="mt-3 overflow-x-auto">
-        <table class="w-full min-w-[920px] border-collapse text-sm">
+        <table class="w-full min-w-230 border-collapse text-sm">
           <thead>
             <tr class="border-b border-zinc-200 text-left text-zinc-600">
               <th class="px-3 py-2 font-semibold">Update ID</th>

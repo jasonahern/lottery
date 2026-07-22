@@ -84,7 +84,7 @@
   class="relative mx-auto flex w-full max-w-6xl flex-col gap-8 px-4 py-10 sm:px-6 lg:px-8"
 >
   <div
-    class="pointer-events-none absolute inset-x-0 top-0 -z-10 h-56 bg-gradient-to-r from-sky-100 via-cyan-100 to-emerald-100 blur-3xl"
+    class="pointer-events-none absolute inset-x-0 top-0 -z-10 h-56 bg-linear-to-r from-sky-100 via-cyan-100 to-emerald-100 blur-3xl"
   ></div>
 
   <header class="space-y-3">
@@ -98,7 +98,7 @@
   </header>
 
   <div class="grid gap-4 md:grid-cols-3">
-    <Card class="border-sky-200 bg-gradient-to-br from-sky-50 to-white">
+    <Card class="border-sky-200 bg-linear-to-br from-sky-50 to-white">
       <h2 class="text-lg font-semibold text-zinc-900">Data Ingestion</h2>
       <p class="mt-2 text-sm text-zinc-600">
         Fetch the newest draw history, update CSV, and reload the local
@@ -124,7 +124,7 @@
       </div>
     </Card>
 
-    <Card class="border-emerald-200 bg-gradient-to-br from-emerald-50 to-white">
+    <Card class="border-emerald-200 bg-linear-to-br from-emerald-50 to-white">
       <h2 class="text-lg font-semibold text-zinc-900">Neural Training</h2>
       <p class="mt-2 text-sm text-zinc-600">
         Start training runs, monitor progress, and compare holdout results.

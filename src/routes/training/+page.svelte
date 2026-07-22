@@ -354,7 +354,7 @@
   class="relative mx-auto flex w-full max-w-[120rem] flex-col gap-6 px-3 py-8 sm:px-5 lg:px-6"
 >
   <div
-    class="pointer-events-none absolute inset-x-0 top-0 -z-10 h-40 bg-gradient-to-r from-cyan-100 via-sky-100 to-emerald-100 blur-2xl"
+    class="pointer-events-none absolute inset-x-0 top-0 -z-10 h-40 bg-linear-to-r from-cyan-100 via-sky-100 to-emerald-100 blur-2xl"
   ></div>
 
   <header
@@ -440,7 +440,7 @@
     </Card>
   </div>
 
-  <Card class="border-cyan-200 bg-gradient-to-br from-cyan-50 to-white">
+  <Card class="border-cyan-200 bg-linear-to-br from-cyan-50 to-white">
     <div
       class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
     >
@@ -458,7 +458,7 @@
     </div>
   </Card>
 
-  <Card class="border-emerald-300 bg-gradient-to-br from-emerald-100 to-white">
+  <Card class="border-emerald-300 bg-linear-to-br from-emerald-100 to-white">
     <div
       class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
     >
@@ -653,7 +653,7 @@
           <select
             name="predictionRunId"
             bind:value={predictionRunInput}
-            class="h-10 min-w-[220px] flex-1 rounded-md border border-emerald-200 bg-white px-3 text-sm text-zinc-900 shadow-sm focus:border-emerald-400 focus:outline-none"
+            class="h-10 min-w-55 flex-1 rounded-md border border-emerald-200 bg-white px-3 text-sm text-zinc-900 shadow-sm focus:border-emerald-400 focus:outline-none"
           >
             <option value="">Select completed run...</option>
             {#each predictionRunCandidates as run}
@@ -1071,7 +1071,7 @@
     {/if}
   </Card>
 
-  <Card class="border-sky-200 bg-gradient-to-br from-sky-50 to-white">
+  <Card class="border-sky-200 bg-linear-to-br from-sky-50 to-white">
     <div
       class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"
     >
@@ -1256,7 +1256,7 @@
       <p class="mt-2 text-sm text-zinc-600">No runs yet.</p>
     {:else}
       <div class="mt-4 overflow-x-auto">
-        <table class="w-full min-w-[760px] border-collapse text-sm">
+        <table class="w-full min-w-190 border-collapse text-sm">
           <thead>
             <tr class="border-b border-zinc-200 text-left text-zinc-600">
               <th class="px-3 py-2 font-semibold">ID</th>
@@ -1327,7 +1327,7 @@
       <p class="mt-2 text-sm text-zinc-600">No comparable runs yet.</p>
     {:else}
       <div class="mt-4 overflow-x-auto">
-        <table class="w-full min-w-[980px] border-collapse text-sm">
+        <table class="w-full min-w-245 border-collapse text-sm">
           <thead>
             <tr class="border-b border-zinc-200 text-left text-zinc-600">
               <th class="px-3 py-2 font-semibold">Run</th>
@@ -1404,7 +1404,7 @@
         </p>
       {/if}
       <div class="mt-4 overflow-x-auto">
-        <table class="w-full min-w-[900px] border-collapse text-sm">
+        <table class="w-full min-w-225 border-collapse text-sm">
           <thead
             ><tr class="border-b border-zinc-200 text-left text-zinc-600">
               <th class="px-3 py-2">Fold</th><th class="px-3 py-2"
@@ -1508,7 +1508,7 @@
           </span>
         </div>
         <div class="mt-4 overflow-x-auto">
-          <table class="w-full min-w-[980px] border-collapse text-sm">
+          <table class="w-full min-w-245 border-collapse text-sm">
             <thead>
               <tr class="border-b border-zinc-200 text-left text-zinc-600">
                 <th class="px-3 py-2 font-semibold">Draw #</th>
