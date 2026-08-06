@@ -31,7 +31,10 @@ import {
   setRunFavorite,
   type RunSummary,
 } from "$lib/server/ml/runs";
-import { getNextDrawPrediction } from "$lib/server/ml/prediction";
+import {
+  getNextDrawPrediction,
+  getPostRunEvaluation,
+} from "$lib/server/ml/prediction";
 import { startTrainingRun } from "$lib/server/ml/trainer";
 import type { Actions } from "./$types";
 
@@ -101,6 +104,9 @@ export const load = async ({ url }) => {
   const holdoutRunDetail = holdoutResultsRunId
     ? getRunDetail(holdoutResultsRunId, { epochs: 300, tests: 50 })
     : null;
+  const postRunEvaluation = pinnedPredictionRunId
+    ? await getPostRunEvaluation(pinnedPredictionRunId)
+    : null;
 
   let nextDrawPrediction = null;
   let predictionRunMessage: string | null = null;
@@ -127,6 +133,7 @@ export const load = async ({ url }) => {
     latestRuns,
     activeRun,
     holdoutRunDetail,
+    postRunEvaluation,
     holdoutResultsRunId,
     nextDrawPrediction,
     datasetStats: getDatasetStats(),

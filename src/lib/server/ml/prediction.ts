@@ -4,9 +4,9 @@ import * as tf from "@tensorflow/tfjs";
 import { and, desc, eq, isNotNull } from "drizzle-orm";
 
 import { db } from "$lib/server/db";
-import { nnTrainingRuns } from "$lib/server/db/schema";
+import { nnTestResults, nnTrainingRuns } from "$lib/server/db/schema";
 
-import { buildDrawEventHistory, loadParsedDraws } from "./data";
+import { buildDrawEventHistory, createWindowedSamples, loadParsedDraws } from "./data";
 import type { ReliabilityGateDiagnostics } from "./backtest";
 import {
   buildInputVector,
@@ -70,6 +70,24 @@ export type NextDrawPrediction = {
   neuralSeeds: number[];
   neuralAveragingMethod: "equal_probability_mean";
   generatedAt: string;
+};
+
+export type PostRunEvaluation = {
+  runId: number;
+  trainedDatasetThrough: string;
+  currentDatasetThrough: string;
+  results: Array<{
+    drawId: number;
+    drawNumber: number;
+    drawDate: string;
+    drawRound: number;
+    predictedNumbers: number[];
+    actualNumbers: number[];
+    matchedNumbers: number[];
+    matchCount: number;
+  }>;
+  averageMatches: number;
+  drawsWithMatch: number;
 };
 
 function buildInferenceModel(params: {
@@ -348,4 +366,135 @@ export async function getNextDrawPrediction(
     models.forEach((model) => model.dispose());
     await tf.nextFrame();
   }
+}
+
+/**
+ * Scores a frozen run against draws imported after the dataset boundary that
+ * run was originally tested on. Each row is walk-forward: its input window
+ * contains only events earlier than the target draw.
+ */
+export async function getPostRunEvaluation(
+  runId: number,
+): Promise<PostRunEvaluation | null> {
+  const run = db
+    .select({
+      id: nnTrainingRuns.id,
+      status: nnTrainingRuns.status,
+      modelArtifactPath: nnTrainingRuns.modelArtifactPath,
+      hyperparamsJson: nnTrainingRuns.hyperparamsJson,
+      isValid: nnTrainingRuns.isValid,
+    })
+    .from(nnTrainingRuns)
+    .where(eq(nnTrainingRuns.id, runId))
+    .get();
+  const boundary = db
+    .select({ drawDate: nnTestResults.drawDate })
+    .from(nnTestResults)
+    .where(eq(nnTestResults.runId, runId))
+    .orderBy(desc(nnTestResults.drawDate))
+    .get()?.drawDate;
+
+  if (
+    !run ||
+    run.status !== "completed" ||
+    !run.isValid ||
+    !run.modelArtifactPath ||
+    !boundary
+  ) {
+    return null;
+  }
+
+  const artifact = JSON.parse(
+    await readFile(run.modelArtifactPath, "utf8"),
+  ) as SerializedModelArtifact;
+  const hyperparams = JSON.parse(run.hyperparamsJson) as {
+    windowSize?: number;
+    activation?: "relu" | "tanh" | "sigmoid";
+  };
+  const windowSize = hyperparams.windowSize ?? 10;
+  const draws = loadParsedDraws();
+  const samples = createWindowedSamples(draws, windowSize).filter(
+    (sample) =>
+      sample.targetDraw.drawDate.toISOString().slice(0, 10) > boundary,
+  );
+  const latestDraw = buildDrawEventHistory(draws).at(-1);
+  const members = artifact.members?.length
+    ? artifact.members
+    : [{ seed: artifact.trainingSeed ?? 42, weights: artifact.weights }];
+  const models = members.map((member) =>
+    buildInferenceModel({
+      hiddenLayers: artifact.hiddenLayers,
+      inputSize: artifact.inputSize,
+      outputSize: artifact.outputSize,
+      activation: hyperparams.activation ?? "relu",
+      weights: member.weights,
+    }),
+  );
+  const results: PostRunEvaluation["results"] = [];
+
+  try {
+    for (const sample of samples) {
+      const input =
+        (artifact.inputEncoding ?? "sorted_scalar_v1") ===
+        "windowed_multi_hot_v1"
+          ? buildMultiHotInputVector(sample.inputWindow, artifact.outputNumbers)
+          : buildInputVector(
+              sample.inputWindow,
+              Math.max(...artifact.outputNumbers),
+            );
+      const inputTensor = tf.tensor2d([input], [1, artifact.inputSize]);
+      const totals = new Array(artifact.outputSize).fill(0);
+      try {
+        for (const model of models) {
+          const output = model.predict(inputTensor) as tf.Tensor;
+          const scores = await output.data();
+          scores.forEach((value, index) => (totals[index] += value));
+          output.dispose();
+        }
+      } finally {
+        inputTensor.dispose();
+      }
+      const predictedNumbers = pickTopKNumbers(
+        totals.map((value) => value / models.length),
+        artifact.outputNumbers,
+        LOTTERY_TICKET_SIZE,
+      );
+      const actualNumbers = [...sample.targetDraw.winningNumbers].sort(
+        (a, b) => a - b,
+      );
+      const matchedNumbers = predictedNumbers.filter((number) =>
+        actualNumbers.includes(number),
+      );
+      results.push({
+        drawId: sample.targetDraw.id,
+        drawNumber: sample.targetDraw.drawNumber,
+        drawDate: sample.targetDraw.drawDate.toISOString().slice(0, 10),
+        drawRound: sample.targetDraw.drawRound,
+        predictedNumbers,
+        actualNumbers,
+        matchedNumbers,
+        matchCount: matchedNumbers.length,
+      });
+    }
+  } finally {
+    models.forEach((model) => model.dispose());
+    await tf.nextFrame();
+  }
+
+  return {
+    runId,
+    trainedDatasetThrough: boundary,
+    currentDatasetThrough: latestDraw
+      ? latestDraw.drawDate.toISOString().slice(0, 10)
+      : boundary,
+    results: results.sort(
+      (a, b) =>
+        b.drawDate.localeCompare(a.drawDate) || b.drawRound - a.drawRound,
+    ),
+    averageMatches: results.length
+      ? results.reduce((sum, result) => sum + result.matchCount, 0) /
+        results.length
+      : 0,
+    drawsWithMatch: results.filter((result) => result.matchCount > 0).length,
+  };
 }

@@ -14,6 +14,7 @@
   const latestRuns = $derived(data.latestRuns);
   const activeRun = $derived(data.activeRun);
   const holdoutRunDetail = $derived(data.holdoutRunDetail);
+  const postRunEvaluation = $derived(data.postRunEvaluation);
   const holdoutResultsRunId = $derived(data.holdoutResultsRunId);
   const nextDrawPrediction = $derived(data.nextDrawPrediction);
   const datasetStats = $derived(data.datasetStats);
@@ -1448,6 +1449,43 @@
           >
         </table>
       </div>
+    </Card>
+  {/if}
+
+  {#if pinnedPredictionRunId}
+    <Card class="border-violet-200 bg-linear-to-br from-violet-50 to-white">
+      <h2 class="text-xl font-semibold text-zinc-900">
+        Since-Run Results (Run #{pinnedPredictionRunId})
+      </h2>
+      {#if postRunEvaluation}
+        <p class="mt-1 text-sm text-zinc-700">
+          Frozen model tested on newly imported draws after {postRunEvaluation.trainedDatasetThrough}, through {postRunEvaluation.currentDatasetThrough}. Each prediction uses only draws that occurred before its target.
+        </p>
+        {#if postRunEvaluation.results.length > 0}
+          <p class="mt-2 text-sm font-semibold text-violet-900">
+            Average {postRunEvaluation.averageMatches.toFixed(2)} matches per round; {postRunEvaluation.drawsWithMatch}/{postRunEvaluation.results.length} rounds matched at least one number.
+          </p>
+          <div class="mt-4 overflow-x-auto">
+            <table class="w-full min-w-190 border-collapse text-sm">
+              <thead><tr class="border-b border-zinc-200 text-left text-zinc-600">
+                <th class="px-3 py-2 font-semibold">Draw</th><th class="px-3 py-2 font-semibold">Date</th><th class="px-3 py-2 font-semibold">Round</th><th class="px-3 py-2 font-semibold">Model numbers</th><th class="px-3 py-2 font-semibold">Actual numbers</th><th class="px-3 py-2 font-semibold">Matches</th>
+              </tr></thead>
+              <tbody>{#each postRunEvaluation.results as result}
+                <tr class="border-b border-zinc-100 text-zinc-800">
+                  <td class="px-3 py-2">#{result.drawNumber}</td><td class="px-3 py-2">{result.drawDate}</td><td class="px-3 py-2">{result.drawRound}</td>
+                  <td class="px-3 py-2"><div class="flex min-w-48 flex-wrap gap-1">{#each result.predictedNumbers as number}<span class:bg-emerald-600={result.matchedNumbers.includes(number)} class:text-white={result.matchedNumbers.includes(number)} class:bg-zinc-200={!result.matchedNumbers.includes(number)} class="inline-flex h-7 min-w-7 items-center justify-center rounded-full px-1.5 text-xs font-semibold">{number}</span>{/each}</div></td>
+                  <td class="px-3 py-2"><div class="flex min-w-48 flex-wrap gap-1">{#each result.actualNumbers as number}<span class:bg-emerald-600={result.matchedNumbers.includes(number)} class:bg-sky-700={!result.matchedNumbers.includes(number)} class="inline-flex h-7 min-w-7 items-center justify-center rounded-full px-1.5 text-xs font-semibold text-white">{number}</span>{/each}</div></td>
+                  <td class="px-3 py-2"><span class="inline-flex min-w-8 justify-center rounded-full bg-violet-100 px-2 py-1 font-bold text-violet-800">{result.matchCount}</span></td>
+                </tr>
+              {/each}</tbody>
+            </table>
+          </div>
+        {:else}
+          <p class="mt-2 text-sm text-zinc-600">No draws newer than this run's original dataset are loaded yet.</p>
+        {/if}
+      {:else}
+        <p class="mt-2 text-sm text-zinc-600">This run does not have enough saved boundary information to calculate since-run results.</p>
+      {/if}
     </Card>
   {/if}
 
