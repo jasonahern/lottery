@@ -192,6 +192,7 @@ export const actions: Actions = {
         `✓ Saved ${OUTPUT_FILE} to ./${OUTPUT_DIR}/`,
         `✓ Reloaded lottery.db with ${importedRows} records using Drizzle.`,
         `✓ Resolved ${resolvedFeedback} pending prediction feedback outcomes.`,
+        "✓ Open Training → Policy Report to view success rates for the pinned run.",
       ],
       message: `✓ Saved ${OUTPUT_FILE} and reloaded lottery.db.`,
     };

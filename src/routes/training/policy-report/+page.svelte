@@ -1,11 +1,14 @@
 <script lang="ts">
-  let { data } = $props();
+  import { enhance } from "$app/forms";
+
+  let { data, form } = $props();
 
   const feedbackStatus = $derived(data.feedbackStatus);
   const history = $derived(data.history);
   const trend = $derived(data.trend);
   const successHistory = $derived(data.successHistory);
   const successTrend = $derived(data.successTrend);
+  const selectedRunId = $derived(data.selectedRunId);
 
   const chart = $derived.by(() => {
     if (!trend || trend.length === 0) {
@@ -146,8 +149,9 @@
         Policy Update Report
       </h1>
       <p class="mt-1 text-sm text-zinc-600">
-        Review policy update history and reward trends used by the
-        reinforcement-style feedback loop.
+        Success results are shown for {selectedRunId
+          ? `the selected prediction run #${selectedRunId}`
+          : "all runs because no prediction run is pinned"}.
       </p>
     </div>
     <div class="flex gap-2">
@@ -165,6 +169,27 @@
       </a>
     </div>
   </header>
+
+  <section class="rounded-lg border border-emerald-200 bg-emerald-50 p-4">
+    <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div>
+        <p class="font-semibold text-emerald-900">
+          {selectedRunId ? `Selected run #${selectedRunId}` : "No run selected"}
+        </p>
+        <p class="mt-1 text-sm text-zinc-700">
+          Load the newest draws on the home page, then refresh here. Only predictions saved before a draw occurred can be scored.
+        </p>
+      </div>
+      <form method="POST" action="?/refreshResults" use:enhance>
+        <button type="submit" class="inline-flex cursor-pointer items-center rounded-md border border-emerald-300 bg-white px-3 py-2 text-sm font-semibold text-emerald-800 hover:bg-emerald-100">
+          Refresh selected results
+        </button>
+      </form>
+    </div>
+    {#if form?.refreshMessage}
+      <p class="mt-2 text-sm text-emerald-800">{form.refreshMessage}</p>
+    {/if}
+  </section>
 
   <section class="grid gap-4 md:grid-cols-5">
     <div class="rounded-lg border border-zinc-200 bg-white p-4">
@@ -328,6 +353,7 @@
               <th class="px-3 py-2 font-semibold">Outcome ID</th>
               <th class="px-3 py-2 font-semibold">Draw ID</th>
               <th class="px-3 py-2 font-semibold">Decision ID</th>
+              <th class="px-3 py-2 font-semibold">Run</th>
               <th class="px-3 py-2 font-semibold">Matches</th>
               <th class="px-3 py-2 font-semibold">Actual Count</th>
               <th class="px-3 py-2 font-semibold">Success %</th>
@@ -340,6 +366,7 @@
                 <td class="px-3 py-2">{item.id}</td>
                 <td class="px-3 py-2">{item.drawId ?? "n/a"}</td>
                 <td class="px-3 py-2">{item.decisionId}</td>
+                <td class="px-3 py-2">{item.runId ? `#${item.runId}` : "n/a"}</td>
                 <td class="px-3 py-2">{item.matchCount}</td>
                 <td class="px-3 py-2">{item.actualCount}</td>
                 <td class="px-3 py-2">{item.successPercent}%</td>

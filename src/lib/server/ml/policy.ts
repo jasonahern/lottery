@@ -86,6 +86,7 @@ export type RewardTrendPoint = {
 export type SuccessHistoryItem = {
   id: number;
   decisionId: number;
+  runId: number | null;
   drawId: number | null;
   matchCount: number;
   actualCount: number;
@@ -657,7 +658,10 @@ function countMatches(predicted: number[], actual: number[]): number {
   return predicted.filter((n) => actualSet.has(n)).length;
 }
 
-export function resolvePendingFeedback(limit = 200): {
+export function resolvePendingFeedback(
+  limit = 200,
+  runId?: number | null,
+): {
   resolvedCount: number;
 } {
   const pending = db
@@ -672,7 +676,12 @@ export function resolvePendingFeedback(limit = 200): {
       algorithmVersion: nnPredictionDecisions.algorithmVersion,
     })
     .from(nnPredictionDecisions)
-    .where(eq(nnPredictionDecisions.resolved, false))
+    .where(
+      and(
+        eq(nnPredictionDecisions.resolved, false),
+        runId ? eq(nnPredictionDecisions.runId, runId) : undefined,
+      ),
+    )
     .orderBy(desc(nnPredictionDecisions.id))
     .limit(limit)
     .all();
@@ -924,10 +933,14 @@ function parseActualNumberCount(actualNumbersJson: string): number {
   return 0;
 }
 
-export function getSuccessHistory(limit = 120): SuccessHistoryItem[] {
+export function getSuccessHistory(
+  limit = 120,
+  runId?: number | null,
+): SuccessHistoryItem[] {
   let rows: Array<{
     id: number;
     decisionId: number;
+    runId: number | null;
     drawId: number | null;
     matchCount: number;
     actualNumbers: string;
@@ -939,12 +952,18 @@ export function getSuccessHistory(limit = 120): SuccessHistoryItem[] {
       .select({
         id: nnFeedbackOutcomes.id,
         decisionId: nnFeedbackOutcomes.decisionId,
+        runId: nnPredictionDecisions.runId,
         drawId: nnFeedbackOutcomes.drawId,
         matchCount: nnFeedbackOutcomes.matchCount,
         actualNumbers: nnFeedbackOutcomes.actualNumbers,
         createdAt: nnFeedbackOutcomes.createdAt,
       })
       .from(nnFeedbackOutcomes)
+      .innerJoin(
+        nnPredictionDecisions,
+        eq(nnFeedbackOutcomes.decisionId, nnPredictionDecisions.id),
+      )
+      .where(runId ? eq(nnPredictionDecisions.runId, runId) : undefined)
       .orderBy(desc(nnFeedbackOutcomes.id))
       .limit(limit)
       .all();
@@ -960,6 +979,7 @@ export function getSuccessHistory(limit = 120): SuccessHistoryItem[] {
     return {
       id: row.id,
       decisionId: row.decisionId,
+      runId: row.runId,
       drawId: row.drawId,
       matchCount: row.matchCount,
       actualCount,
@@ -969,8 +989,11 @@ export function getSuccessHistory(limit = 120): SuccessHistoryItem[] {
   });
 }
 
-export function getSuccessTrend(limit = 120): SuccessTrendPoint[] {
-  const history = getSuccessHistory(limit).slice().reverse();
+export function getSuccessTrend(
+  limit = 120,
+  runId?: number | null,
+): SuccessTrendPoint[] {
+  const history = getSuccessHistory(limit, runId).slice().reverse();
 
   const rollingWindow = 10;
   const points: SuccessTrendPoint[] = [];
